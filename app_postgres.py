@@ -52,8 +52,77 @@ def _conn():
             "  updated_at TIMESTAMPTZ DEFAULT now()"
             ")"
         )
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS sessions ("
+            "  token_hash TEXT PRIMARY KEY,"
+            "  emp_id     TEXT,"
+            "  email      TEXT,"
+            "  created_at DOUBLE PRECISION,"
+            "  expires_at DOUBLE PRECISION"
+            ")"
+        )
         conn.commit()
     return conn
+
+
+# --- accessors the shared auth layer needs (see install_shared) ---------
+
+def _kv_get_raw(key):
+    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+        cur.execute("SELECT value FROM kv WHERE key = %s", (key,))
+        row = cur.fetchone()
+    return row[0] if row else None
+
+
+def _sess_get(token_hash):
+    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+        cur.execute(
+            "SELECT emp_id, email, expires_at FROM sessions WHERE token_hash = %s",
+            (token_hash,),
+        )
+        row = cur.fetchone()
+    if row is None:
+        return None
+    return {"emp_id": row[0], "email": row[1], "expires_at": row[2]}
+
+
+def _sess_put(token_hash, emp_id, email, created_at, expires_at):
+    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+        cur.execute(
+            "INSERT INTO sessions(token_hash, emp_id, email, created_at, expires_at) "
+            "VALUES(%s, %s, %s, %s, %s) "
+            "ON CONFLICT (token_hash) DO UPDATE SET expires_at = EXCLUDED.expires_at",
+            (token_hash, emp_id, email, created_at, expires_at),
+        )
+        conn.commit()
+
+
+def _sess_touch(token_hash, expires_at):
+    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+        cur.execute("UPDATE sessions SET expires_at = %s WHERE token_hash = %s", (expires_at, token_hash))
+        conn.commit()
+
+
+def _sess_del(token_hash):
+    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM sessions WHERE token_hash = %s", (token_hash,))
+        conn.commit()
+
+
+def _sess_prune(now):
+    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+        cur.execute("DELETE FROM sessions WHERE expires_at < %s", (now,))
+        conn.commit()
+
+
+AUTH_DB = {
+    "kv_get": _kv_get_raw,
+    "sess_get": _sess_get,
+    "sess_put": _sess_put,
+    "sess_touch": _sess_touch,
+    "sess_del": _sess_del,
+    "sess_prune": _sess_prune,
+}
 
 
 # Plain `def` (not `async def`): psycopg blocks, so FastAPI runs these in a
@@ -99,7 +168,7 @@ def storage_list(body: ListBody):
 
 
 # Attach the shared routes (email, SMS, health, index, static) LAST.
-install_shared(app)
+install_shared(app, auth_db=AUTH_DB)
 
 
 if __name__ == "__main__":

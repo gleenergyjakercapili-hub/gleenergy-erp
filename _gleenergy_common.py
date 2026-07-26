@@ -15,30 +15,35 @@ Each backend just defines its own `_conn()` + the four storage routes, then call
 `install_shared(app)` to attach all of the above.
 
 -----------------------------------------------------------------------
-SECURITY: turning on the API key (do this BEFORE exposing the server)
+SECURITY: server-side sign-in sessions (always on)
 -----------------------------------------------------------------------
-By default the server runs open (fine on your own PC / trusted office LAN).
-Before you expose it to the internet (e.g. through ngrok), set a secret key:
+Every /api/* call (except health + the auth endpoints themselves) requires a
+signed-in session:
 
-    Windows:   set GLEENERGY_API_KEY=some-long-random-secret
-    Mac/Linux: export GLEENERGY_API_KEY=some-long-random-secret
+  - POST /api/auth/login  {email, password}  verifies the password ON THE
+    SERVER against the stored PBKDF2 hash in p2:employees and sets an
+    HttpOnly session cookie (7 days, sliding). Failed attempts are
+    rate-limited per IP + account.
+  - GET  /api/auth/me     tells the browser whether its cookie is still valid.
+  - POST /api/auth/logout deletes the session and clears the cookie.
 
-When that variable is set:
-  - Every /api/* call must send it in the `X-API-Key` header, OR it is rejected
-    with 401. Random internet scanners and other websites won't have the key.
-  - The server injects the key into the page it serves, so the app in YOUR
-    browser keeps working automatically (nothing to configure in the browser).
-  - Cross-origin (other-website) access is turned off unless you explicitly list
-    allowed origins in GLEENERGY_CORS_ORIGINS (comma-separated).
-  - /api/health stays open so uptime checks keep working.
+The session rows live in a `sessions` table next to the kv table (each backend
+supplies its own accessors via install_shared(app, auth_db=...)). Only the
+SHA-256 of the token is stored, so the database alone can't forge a cookie.
 
-If GLEENERGY_API_KEY is NOT set, behaviour is exactly as before (open server,
-permissive CORS) and a warning is printed at startup.
+GLEENERGY_API_KEY is now ONLY for server-to-server scripts and backups: an
+X-API-Key header equal to it also passes the guard. It is NO LONGER injected
+into the served page — browsers authenticate with their session cookie.
+Cross-origin access stays off unless GLEENERGY_CORS_ORIGINS lists origins.
 """
 
 import os
 import json
 import ssl
+import time
+import hmac
+import hashlib
+import secrets
 import smtplib
 import urllib.request
 import urllib.parse
@@ -47,8 +52,9 @@ from email.message import EmailMessage
 
 from pydantic import BaseModel
 from fastapi import Request
-from fastapi.responses import FileResponse, JSONResponse, HTMLResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.concurrency import run_in_threadpool
 
 BASE_DIR = os.path.dirname(__file__)
 PUBLIC_DIR = os.path.join(BASE_DIR, "public")
@@ -56,11 +62,131 @@ INDEX_FILE = os.path.join(PUBLIC_DIR, "index.html")
 EMAIL_CONFIG_FILE = os.path.join(BASE_DIR, "config", "email_config.json")
 SMS_CONFIG_FILE = os.path.join(BASE_DIR, "config", "sms_config.json")
 
-# Secret that guards the /api/* routes. Empty string = protection off.
+# Secret for server-to-server scripts/backups (X-API-Key header). Browsers use
+# session cookies instead; this is never injected into the served page.
 API_KEY = os.environ.get("GLEENERGY_API_KEY", "").strip()
 
-# Paths that are still reachable without the key even when protection is on.
-_OPEN_API_PATHS = {"/api/health"}
+# Paths reachable without a session (the auth endpoints must be, or nobody
+# could ever sign in).
+_OPEN_API_PATHS = {"/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/me"}
+
+# ----------------------------------------------------------------------
+# Sign-in sessions
+# ----------------------------------------------------------------------
+SESSION_COOKIE = "glee_sess"
+SESSION_TTL = 7 * 24 * 3600          # 7 days, sliding (renewed on activity)
+_RENEW_AFTER = 12 * 3600             # extend at most every ~12 hours
+
+# In-memory cache so chatty storage traffic doesn't hit the sessions table on
+# every request (single-process deployment; logout evicts explicitly).
+_SESS_CACHE = {}
+_SESS_CACHE_TTL = 60
+
+# Failed-login tracker: {key: [timestamps]}. Per account+IP and per IP.
+_LOGIN_FAILS = {}
+_FAIL_WINDOW = 600                   # 10 minutes
+_MAX_FAILS_ACCOUNT = 8
+_MAX_FAILS_IP = 30
+
+
+def _client_ip(request):
+    fwd = request.headers.get("x-forwarded-for", "")
+    if fwd:
+        return fwd.split(",")[0].strip()
+    return request.client.host if request.client else "?"
+
+
+def _is_https(request):
+    proto = request.headers.get("x-forwarded-proto", "").split(",")[0].strip().lower()
+    return proto == "https" or request.url.scheme == "https"
+
+
+def _fails_in_window(key, now):
+    arr = [t for t in _LOGIN_FAILS.get(key, []) if now - t < _FAIL_WINDOW]
+    if arr:
+        _LOGIN_FAILS[key] = arr
+    else:
+        _LOGIN_FAILS.pop(key, None)
+    return len(arr)
+
+
+def _record_fail(key, now):
+    _LOGIN_FAILS.setdefault(key, []).append(now)
+
+
+def _pw_ok(password, emp):
+    """Verify a password against one employee record — the exact mirror of the
+    app's pwDerive/pwVerify (PBKDF2-SHA256, hex salt + hex 32-byte hash)."""
+    pw = password or ""
+    if emp.get("passHash"):
+        try:
+            salt = bytes.fromhex(emp.get("passSalt") or "")
+            iters = int(emp.get("passIter") or 120000)
+        except (ValueError, TypeError):
+            return False
+        digest = hashlib.pbkdf2_hmac("sha256", pw.encode("utf-8"), salt, iters).hex()
+        return hmac.compare_digest(digest, emp["passHash"])
+    if emp.get("pass") is not None:                      # legacy plaintext, pre-migration
+        return hmac.compare_digest(str(emp["pass"]), pw)
+    return False
+
+
+def _emp_active(emp):
+    status = emp.get("status") or "Regular"
+    return status not in ("Resigned", "Inactive")
+
+
+def _find_employee(kv_get, email):
+    """Returns (employee_or_None, roster_missing). roster_missing=True only when
+    p2:employees has never been written — a brand-new empty database."""
+    raw = kv_get("p2:employees")
+    if raw is None:
+        return None, True
+    try:
+        emps = json.loads(raw)
+    except (ValueError, TypeError):
+        return None, False
+    email = (email or "").strip().lower()
+    for e in emps:
+        if str(e.get("email", "")).strip().lower() == email:
+            return e, False
+    return None, False
+
+
+def _token_hash(token):
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+def _session_from_request(request, auth_db):
+    """Look up (and slide) the session for this request's cookie. Sync — call
+    via run_in_threadpool from async middleware."""
+    token = request.cookies.get(SESSION_COOKIE) or ""
+    if not token or not auth_db:
+        return None
+    th = _token_hash(token)
+    now = time.time()
+    cached = _SESS_CACHE.get(th)
+    if cached and cached["expires_at"] > now and now - cached["checked"] < _SESS_CACHE_TTL:
+        return cached
+    row = auth_db["sess_get"](th)
+    if not row or row["expires_at"] <= now:
+        _SESS_CACHE.pop(th, None)
+        return None
+    if row["expires_at"] - now < SESSION_TTL - _RENEW_AFTER:      # sliding renewal
+        auth_db["sess_touch"](th, now + SESSION_TTL)
+        row["expires_at"] = now + SESSION_TTL
+    entry = {"emp_id": row["emp_id"], "email": row["email"],
+             "expires_at": row["expires_at"], "checked": now}
+    _SESS_CACHE[th] = entry
+    if len(_SESS_CACHE) > 500:                                     # keep the cache tiny
+        for k, v in list(_SESS_CACHE.items()):
+            if v["expires_at"] <= now or now - v["checked"] > _SESS_CACHE_TTL:
+                _SESS_CACHE.pop(k, None)
+    return entry
+
+
+def _api_key_matches(request):
+    return bool(API_KEY) and hmac.compare_digest(request.headers.get("x-api-key", ""), API_KEY)
 
 
 # ----------------------------------------------------------------------
@@ -80,6 +206,11 @@ class SetBody(BaseModel):
 
 class ListBody(BaseModel):
     prefix: str = ""
+
+
+class LoginBody(BaseModel):
+    email: str = ""
+    password: str = ""
 
 
 class EmailBody(BaseModel):
@@ -318,19 +449,10 @@ def _parse_xlsx(body: XlsxBody):
 def _serve_index():
     if not os.path.isfile(INDEX_FILE):
         return JSONResponse({"error": "index.html not found"}, status_code=404)
-    if not API_KEY:
-        return FileResponse(INDEX_FILE)
-    # Protection is on: hand the browser the key so the same-origin app can
-    # authenticate. Other websites can't read this response (CORS is locked
-    # down when a key is set), so the key stays out of their reach.
-    with open(INDEX_FILE, "r", encoding="utf-8") as f:
-        html = f.read()
-    inject = f"<script>window.GLEENERGY_API_KEY={json.dumps(API_KEY)};</script>"
-    if "</head>" in html:
-        html = html.replace("</head>", inject + "</head>", 1)
-    else:
-        html = inject + html
-    return HTMLResponse(html)
+    # The page is served as-is. Browsers authenticate with their session cookie;
+    # the API key is never injected (it used to be, which published it to anyone
+    # who could load the page).
+    return FileResponse(INDEX_FILE)
 
 
 def _serve_static(path: str):
@@ -349,8 +471,18 @@ def _serve_static(path: str):
 # ----------------------------------------------------------------------
 # install_shared: attach CORS, the API-key guard, and all shared routes
 # ----------------------------------------------------------------------
-def install_shared(app):
-    """Attach everything that is common to both backends onto `app`."""
+def install_shared(app, auth_db=None):
+    """Attach everything that is common to both backends onto `app`.
+
+    auth_db: dict of storage accessors the auth layer needs, supplied by each
+    backend so this module stays database-agnostic:
+      kv_get(key) -> value-string or None
+      sess_get(token_hash) -> {"emp_id","email","expires_at"} or None
+      sess_put(token_hash, emp_id, email, created_at, expires_at)
+      sess_touch(token_hash, expires_at)
+      sess_del(token_hash)
+      sess_prune(now)          # delete expired rows
+    """
 
     # --- CORS --------------------------------------------------------------
     if API_KEY:
@@ -372,22 +504,108 @@ def install_shared(app):
             allow_methods=["*"],
             allow_headers=["*"],
         )
-        print("[gleenergy] WARNING: GLEENERGY_API_KEY is not set — the /api endpoints "
-              "are UNPROTECTED. Fine on your own PC, but set it before exposing the "
-              "server to the internet (e.g. through ngrok).")
+        print("[gleenergy] NOTE: GLEENERGY_API_KEY is not set. Sign-in sessions still "
+              "guard the /api endpoints; the key only adds script/backup access and "
+              "locked-down CORS, so set it for internet-facing deployments.")
 
-    # --- API-key guard for /api/* -----------------------------------------
+    # --- Session guard for /api/* ------------------------------------------
     @app.middleware("http")
-    async def _api_key_guard(request: Request, call_next):
-        if API_KEY and request.method != "OPTIONS":  # let CORS preflight through
+    async def _auth_guard(request: Request, call_next):
+        if request.method != "OPTIONS":  # let CORS preflight through
             path = request.url.path
-            if path.startswith("/api/") and path not in _OPEN_API_PATHS:
-                if request.headers.get("x-api-key", "") != API_KEY:
-                    return JSONResponse(
-                        {"ok": False, "error": "Invalid or missing API key."},
-                        status_code=401,
-                    )
+            if path.startswith("/api/"):
+                # Cross-site POSTs are refused outright (SameSite=Lax already
+                # keeps the cookie home; this also covers older browsers).
+                if request.method == "POST" and not _api_key_matches(request):
+                    origin = request.headers.get("origin", "")
+                    if origin:
+                        onet = urllib.parse.urlsplit(origin).netloc.lower()
+                        host = request.headers.get("host", "").lower()
+                        if onet and host and onet != host:
+                            return JSONResponse(
+                                {"ok": False, "error": "Cross-origin request refused."},
+                                status_code=403,
+                            )
+                if path not in _OPEN_API_PATHS:
+                    authed = _api_key_matches(request)
+                    if not authed and auth_db is not None:
+                        sess = await run_in_threadpool(_session_from_request, request, auth_db)
+                        if sess:
+                            authed = True
+                            request.state.session = sess
+                    if not authed and auth_db is None and not API_KEY:
+                        authed = True   # no session backend wired and no key: open dev fallback
+                    if not authed:
+                        return JSONResponse(
+                            {"ok": False, "error": "Not signed in."},
+                            status_code=401,
+                        )
         return await call_next(request)
+
+    # --- Sign-in / session routes ------------------------------------------
+    @app.post("/api/auth/login")
+    def auth_login(body: LoginBody, request: Request):
+        if auth_db is None:
+            return JSONResponse({"ok": False, "error": "Sessions are not configured on this server."}, status_code=500)
+        email = (body.email or "").strip().lower()
+        password = body.password or ""
+        if not email or not password:
+            return JSONResponse({"ok": False, "error": "Email and password are required."}, status_code=400)
+        now = time.time()
+        ip = _client_ip(request)
+        acct_key = ip + "|" + email
+        if (_fails_in_window(acct_key, now) >= _MAX_FAILS_ACCOUNT
+                or _fails_in_window("ip|" + ip, now) >= _MAX_FAILS_IP):
+            return JSONResponse(
+                {"ok": False, "error": "Too many sign-in attempts — please wait 10 minutes and try again."},
+                status_code=429,
+            )
+        emp, roster_missing = _find_employee(auth_db["kv_get"], email)
+        # Brand-new empty database: let the seed Super Admin in once so the app
+        # can initialise itself. Never triggers once p2:employees exists.
+        bootstrap = roster_missing and email == "ceo@solar" and password == "demo123"
+        if not bootstrap and (emp is None or not _pw_ok(password, emp)):
+            _record_fail(acct_key, now)
+            _record_fail("ip|" + ip, now)
+            return JSONResponse(
+                {"ok": False, "error": "That email or password doesn't match. Please try again."},
+                status_code=401,
+            )
+        if emp is not None and not _emp_active(emp):
+            return JSONResponse(
+                {"ok": False, "error": "This account is inactive — please contact your administrator."},
+                status_code=403,
+            )
+        _LOGIN_FAILS.pop(acct_key, None)
+        token = secrets.token_urlsafe(32)
+        th = _token_hash(token)
+        emp_id = emp["id"] if emp else "e0"
+        auth_db["sess_prune"](now)
+        auth_db["sess_put"](th, emp_id, email, now, now + SESSION_TTL)
+        resp = JSONResponse({"ok": True, "empId": emp_id, "email": email})
+        resp.set_cookie(SESSION_COOKIE, token, max_age=SESSION_TTL, httponly=True,
+                        samesite="lax", secure=_is_https(request), path="/")
+        return resp
+
+    @app.get("/api/auth/me")
+    def auth_me(request: Request):
+        sess = _session_from_request(request, auth_db) if auth_db is not None else None
+        if not sess:
+            return {"ok": False}
+        return {"ok": True, "empId": sess["emp_id"], "email": sess["email"]}
+
+    @app.post("/api/auth/logout")
+    def auth_logout(request: Request):
+        token = request.cookies.get(SESSION_COOKIE) or ""
+        if token and auth_db is not None:
+            th = _token_hash(token)
+            try:
+                auth_db["sess_del"](th)
+            finally:
+                _SESS_CACHE.pop(th, None)
+        resp = JSONResponse({"ok": True})
+        resp.delete_cookie(SESSION_COOKIE, path="/")
+        return resp
 
     # --- Shared routes -----------------------------------------------------
     @app.post("/api/send-email")

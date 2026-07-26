@@ -59,7 +59,7 @@ app = FastAPI(title="Gleenergy Renewables Company System API")
 
 
 def _conn():
-    """Open the database and make sure the storage table exists."""
+    """Open the database and make sure the storage + session tables exist."""
     conn = sqlite3.connect(DB_PATH)
     conn.execute(
         "CREATE TABLE IF NOT EXISTS kv ("
@@ -68,7 +68,73 @@ def _conn():
         "  updated_at TEXT DEFAULT CURRENT_TIMESTAMP"
         ")"
     )
+    conn.execute(
+        "CREATE TABLE IF NOT EXISTS sessions ("
+        "  token_hash TEXT PRIMARY KEY,"
+        "  emp_id     TEXT,"
+        "  email      TEXT,"
+        "  created_at REAL,"
+        "  expires_at REAL"
+        ")"
+    )
     return conn
+
+
+# --- accessors the shared auth layer needs (see install_shared) ---------
+
+def _kv_get_raw(key):
+    with contextlib.closing(_conn()) as conn:
+        row = conn.execute("SELECT value FROM kv WHERE key = ?", (key,)).fetchone()
+    return row[0] if row else None
+
+
+def _sess_get(token_hash):
+    with contextlib.closing(_conn()) as conn:
+        row = conn.execute(
+            "SELECT emp_id, email, expires_at FROM sessions WHERE token_hash = ?",
+            (token_hash,),
+        ).fetchone()
+    if row is None:
+        return None
+    return {"emp_id": row[0], "email": row[1], "expires_at": row[2]}
+
+
+def _sess_put(token_hash, emp_id, email, created_at, expires_at):
+    with contextlib.closing(_conn()) as conn:
+        conn.execute(
+            "INSERT OR REPLACE INTO sessions(token_hash, emp_id, email, created_at, expires_at) "
+            "VALUES(?, ?, ?, ?, ?)",
+            (token_hash, emp_id, email, created_at, expires_at),
+        )
+        conn.commit()
+
+
+def _sess_touch(token_hash, expires_at):
+    with contextlib.closing(_conn()) as conn:
+        conn.execute("UPDATE sessions SET expires_at = ? WHERE token_hash = ?", (expires_at, token_hash))
+        conn.commit()
+
+
+def _sess_del(token_hash):
+    with contextlib.closing(_conn()) as conn:
+        conn.execute("DELETE FROM sessions WHERE token_hash = ?", (token_hash,))
+        conn.commit()
+
+
+def _sess_prune(now):
+    with contextlib.closing(_conn()) as conn:
+        conn.execute("DELETE FROM sessions WHERE expires_at < ?", (now,))
+        conn.commit()
+
+
+AUTH_DB = {
+    "kv_get": _kv_get_raw,
+    "sess_get": _sess_get,
+    "sess_put": _sess_put,
+    "sess_touch": _sess_touch,
+    "sess_del": _sess_del,
+    "sess_prune": _sess_prune,
+}
 
 
 # ----------------------------------------------------------------------
@@ -132,7 +198,7 @@ def export_all():
 
 # Attach the shared routes LAST so /api/export is matched before the
 # catch-all static-file route in install_shared().
-install_shared(app)
+install_shared(app, auth_db=AUTH_DB)
 
 
 if __name__ == "__main__":

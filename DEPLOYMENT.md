@@ -84,11 +84,21 @@ daily; additionally download an in-app Full Backup monthly as an offline copy.
 ## Security notes
 
 - HTTPS is automatic and enforced by Render.
-- `GLEENERGY_API_KEY` is generated on Render and required by the storage API,
-  which blocks random internet scanners from reading/writing data directly.
-- **Honest limitation:** application login remains client-verified (as on the
-  LAN). The API key + HTTPS raise the bar substantially, but true server-side
-  session auth is the next hardening milestone once hosting is live. Until
-  then, treat the URL itself as semi-confidential — don't publish it.
+- **Login is verified on the server.** `POST /api/auth/login` checks the
+  password against the stored PBKDF2 hash and answers with an HttpOnly
+  session cookie (7 days, sliding; `Secure` on HTTPS). Every other `/api/*`
+  call requires that cookie — without signing in, the storage API returns
+  401\. Failed sign-ins are rate-limited (8 per account, 30 per IP, per
+  10 minutes). Sessions live in a `sessions` table (only the SHA-256 of the
+  token is stored) and are revoked on logout.
+- `GLEENERGY_API_KEY` is now **only** for server-to-server scripts and
+  backups (`X-API-Key` header). It is no longer injected into the served
+  page. Because older builds did publish it in the page, **regenerate the
+  key once in Render** (service → Environment → `GLEENERGY_API_KEY` →
+  generate a new value) after this version deploys.
+- Remaining honest limitation: any signed-in employee's browser talks to a
+  shared key-value store, so per-module permissions are still enforced by
+  the app UI, not per-key by the server. Server-side per-key authorization
+  is the next hardening milestone.
 - The `data/` folder (SQLite + backups with real staff records) is git-ignored
   and never leaves the office PC.
