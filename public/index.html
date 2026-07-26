@@ -1402,7 +1402,14 @@ async function init(){
     else if(e.status==="Inactive"){e.status="Resigned";_chg=true;}
     else if(e.status==="On-call"){e.status="On-Call";_chg=true;}
     else if(!e.status){e.status="Regular";_chg=true;}});
+  /* Demo-era safety net: re-create the five seed role accounts if their emails are
+     missing. On a LIVE system this must NEVER run — when the real CEO's record was
+     switched to a real email address, this block resurrected the demo "Glenn Tan"
+     Super Admin (with the shared starter password!) into the production roster.
+     Gated on the go-live flag so it only helps in fresh demo installs. */
+  if(!(await loadKey("p2:golive",""))){
   [["e0","Glenn Tan","Super Admin","President / CEO","ceo@solar"],["e7","Grace Mendoza","HR Admin","HR Administrator","hr@solar"],["e8","Carlo Tan","Accountant","Accountant","acct@solar"],["e9","Ana Reyes","Purchaser","Purchasing Officer","purch@solar"],["e15","Rico Bautista","Inventory Keeper","Warehouse / Inventory Keeper","warehouse@solar"]].forEach(d=>{if(!DB.employees.some(e=>e.email.toLowerCase()===d[4])){DB.employees.push({id:d[0],name:d[1],role:d[2],position:d[3],email:d[4],phone:"",status:"Active",hired:"2024-01-15",pass:"demo123",basic:roleBasic(d[2])});_chg=true;}});
+  }
   if(_chg)await saveKey(K.emp,DB.employees);
   /* One-time: convert any plaintext password to a salted PBKDF2 hash and drop the
      literal value. Existing demo accounts keep the same password (still hashed). */
