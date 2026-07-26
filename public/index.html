@@ -954,7 +954,8 @@
         <button class="kbtn" id="cmdkBtn" title="Search everything (Ctrl+K)" aria-label="Search"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="M20 20l-3.6-3.6"/></svg><span>Search</span><kbd>Ctrl K</kbd></button>
         <div class="meta" style="text-align:right"><b id="whoName"></b><span id="whoRole"></span></div>
         <div class="notif-wrap"><button class="notif-btn" id="notifBtn" title="Notifications" aria-label="Notifications"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span class="notif-badge hide" id="notifBadge">0</span></button><div class="notif-panel hide" id="notifPanel"></div></div>
-        <div class="av" id="whoAv"></div>
+        <div class="av" id="whoAv" title="My account"></div>
+        <button class="btn btn-light" id="changePwBtn" title="Change my password">Password</button>
         <button class="btn btn-out" id="logoutBtn">Log out</button>
       </div>
     </header>
@@ -1452,6 +1453,7 @@ function enterApp(){
   if(_nb)_nb.onclick=(e)=>{e.stopPropagation();const p=document.getElementById("notifPanel");const opening=p.classList.contains("hide");p.classList.toggle("hide");if(opening){renderNotifications();markNotifsSeen();}};
   document.addEventListener("click",(e)=>{const p=document.getElementById("notifPanel");if(p&&!p.classList.contains("hide")&&!e.target.closest(".notif-wrap"))p.classList.add("hide");});
   {const _kb=document.getElementById("cmdkBtn");if(_kb)_kb.onclick=()=>cmdkOpen();}
+  {const _cp=document.getElementById("changePwBtn");if(_cp)_cp.onclick=()=>changePwForm(false);}
   pushHeartbeat();if(!window._hbTimer)window._hbTimer=setInterval(pushHeartbeat,45000);
   if(!window._syncTimer)window._syncTimer=setInterval(syncAssignments,45000);
   /* Phone unlocked / app tabbed back in → check for new assignments right away instead
@@ -1532,9 +1534,11 @@ function openProfileSheet(){
    +'<div style="width:46px;height:46px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:800;overflow:hidden;flex:none">'
    +(user.photo?'<img src="'+user.photo+'" style="width:100%;height:100%;object-fit:cover">':ini)+'</div>'
    +'<div style="min-width:0"><b style="font-size:15px">'+esc(user.name||"")+'</b><div style="font-size:12px;color:var(--muted)">'+esc(user.position||user.role||"")+'</div></div></div>'
+   +'<button class="btn btn-light" id="msChangePw" style="width:100%;padding:12px;text-align:center;margin-bottom:8px">Change my password</button>'
    +'<button class="btn btn-light" id="msLogout" style="width:100%;padding:12px;text-align:center">Log out</button>';
   document.getElementById("msheetBg").classList.add("open");
   document.getElementById("msLogout").onclick=()=>{closeMSheet();logout();};
+  document.getElementById("msChangePw").onclick=()=>{closeMSheet();changePwForm(false);};
 }
 function closeMSheet(){const b=document.getElementById("msheetBg");if(b)b.classList.remove("open");}
 /* ---- Password hashing (salted PBKDF2-SHA256). Running client-side on localhost this
@@ -1610,6 +1614,74 @@ async function pwVerify(password,e){
   return false;
 }
 function buildLoginChips(){const box=document.getElementById("liChips");if(box)box.innerHTML="";}   /* demo quick-login chips removed */
+/* ===== password self-service + forced rotation off the shared starter password ===== */
+const PW_STARTERS=["demo123","password","123456","gleenergy","solar123"];
+function mustRotatePw(e){
+  if(!e)return false;
+  if(e.pwRotated)return false;          /* already set their own */
+  return true;                          /* never rotated since go-live → must set one */
+}
+async function pwIsStarter(pw,e){try{return await pwVerify(pw,e);}catch(_){return false;}}
+function pwStrengthNote(pw){
+  const s=String(pw||"");
+  if(s.length<8)return {ok:false,msg:"Use at least 8 characters."};
+  if(PW_STARTERS.indexOf(s.toLowerCase())>-1)return {ok:false,msg:"That is a shared starter password — choose something only you know."};
+  if(/^[0-9]+$/.test(s))return {ok:false,msg:"Numbers only is easy to guess — add letters."};
+  return {ok:true,msg:"Looks good."};
+}
+function changePwForm(forced){
+  if(typeof user==="undefined"||!user)return;
+  const title=forced?"Set your own password":"Change my password";
+  const intro=forced
+    ? `<div class="notice" style="border-color:#e0b400;background:#fffbe8;margin-bottom:10px"><b>The system is now online at a public address.</b> For your account's security you must replace the shared starter password with one only you know. This takes a few seconds and is required once.</div>`
+    : `<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Choose a password only you know — at least 8 characters.</div>`;
+  openModal(title,intro+
+   `${forced?"":`<div class="fg"><label>Current password</label><input id="pw_cur" type="password" autocomplete="current-password"></div>`}
+    <div class="fg"><label>New password</label><input id="pw_new" type="password" autocomplete="new-password"></div>
+    <div class="fg"><label>Repeat new password</label><input id="pw_new2" type="password" autocomplete="new-password"></div>
+    <div id="pw_note" style="font-size:11.5px;min-height:16px;color:var(--muted)"></div>`,
+   (forced?[]:[["Cancel","btn-out",closeModal]]).concat([["Save password","btn-primary",async()=>{
+     const n1=gv("pw_new"),n2=gv("pw_new2");
+     if(!forced){
+       const cur=gv("pw_cur");
+       if(!await pwVerify(cur,user)){document.getElementById("pw_note").innerHTML='<span style="color:var(--red)">Current password is incorrect.</span>';return;}
+     }
+     if(n1!==n2){document.getElementById("pw_note").innerHTML='<span style="color:var(--red)">The two new passwords do not match.</span>';return;}
+     const st=pwStrengthNote(n1);
+     if(!st.ok){document.getElementById("pw_note").innerHTML='<span style="color:var(--red)">'+esc(st.msg)+'</span>';return;}
+     if(await pwVerify(n1,user)){document.getElementById("pw_note").innerHTML='<span style="color:var(--red)">That is your current password — choose a new one.</span>';return;}
+     await pwSet(user,n1);
+     user.pwRotated=todayStr();
+     await saveKey(K.emp,DB.employees);
+     await logAudit("update","account",user.name,"Password changed by the account owner");
+     closeModal();
+     toast("Password updated — use it next time you sign in","ok");
+   }]]));
+  const note=document.getElementById("pw_note");
+  const nEl=document.getElementById("pw_new");
+  if(nEl)nEl.oninput=()=>{const st=pwStrengthNote(nEl.value);note.innerHTML=nEl.value?`<span style="color:${st.ok?'#1a7f37':'var(--muted)'}">${esc(st.msg)}</span>`:"";};
+  /* A forced change cannot be dismissed — hide the X and disarm the backdrop click. */
+  if(forced){
+    const x=document.getElementById("mx");if(x)x.style.display="none";
+    const bg=document.getElementById("mbg");if(bg)bg.onclick=null;
+  }
+}
+/* HR/Admin view of who has set their own password since go-live. Rotation is tracked
+   by the pwRotated stamp, so this list is instant — no hashes are ever tested. */
+function pwRotationStatus(){
+  if(!can("employees.edit"))return;
+  const act=(DB.employees||[]).filter(empActive);
+  const done=act.filter(e=>e.pwRotated);
+  const pending=act.filter(e=>!e.pwRotated);
+  openModal("Password rotation — "+done.length+" of "+act.length+" done",`
+   <div style="font-size:12px;color:var(--muted);margin-bottom:10px">Everyone still on the shared starter password is <b>forced to set their own the next time they sign in</b> — nothing to distribute. This list simply shows who hasn't signed in since go-live.</div>
+   ${pending.length?`<div class="sec-h">Not yet rotated (${pending.length})</div>
+    <div style="max-height:220px;overflow:auto;font-size:12.5px;line-height:1.8">${pending.map(e=>`<div>• ${esc(e.name)} <span style="color:var(--muted)">— ${esc(e.position||e.role||"")}</span></div>`).join("")}</div>`
+    :'<div class="notice" style="border-color:#1f9d57;background:#eafaf3">Everyone has set their own password. 🎉</div>'}
+   ${done.length?`<div class="sec-h" style="margin-top:10px">Rotated (${done.length})</div>
+    <div style="max-height:140px;overflow:auto;font-size:12px;color:var(--muted);line-height:1.7">${done.map(e=>`<div>✓ ${esc(e.name)} — ${esc(e.pwRotated)}</div>`).join("")}</div>`:""}`,
+   [["Close","btn-light",closeModal]]);
+}
 async function doLogin(){
   const email=gv("liEmail").trim().toLowerCase(),pass=gv("liPass"),err=document.getElementById("liErr");
   if(!email||!pass){err.textContent="Please enter your email and password.";return;}
@@ -1622,6 +1694,9 @@ async function doLogin(){
   if(f.passHash&&f.pass!=null){delete f.pass;await saveKey(K.emp,DB.employees);}   /* drop any lingering plaintext */
   user=f;err.textContent="";saveSession(user.id);
   enterApp();logAudit("login","session",user.name,"Signed in");
+  /* The system is on the public internet — nobody may keep the shared starter
+     password. Anyone still on it must set their own before they can work. */
+  if(mustRotatePw(f))setTimeout(()=>changePwForm(true),350);
 }
 async function logout(){logAudit("logout","session",user?user.name:"","Signed out");
   const _id=user?user.id:null;
@@ -2974,7 +3049,7 @@ function viewEmployees(){
       ?`<b>₱${pnum(r.rate)}</b><span style="font-size:11px;color:var(--muted)">/day</span><div style="font-size:11px;color:var(--muted)">${esc(r.position)} · basic ${pnum(r.basic)} + title ${pnum(r.title)}</div>`
       :`<span class="tag t-inactive">Not on rate list</span><div style="font-size:11px;color:var(--muted)">Add “${esc(e.name)}” in Payroll → Rate</div>`}</td>`;};
   V().innerHTML=`<div class="panel"><div class="panel-head"><div><h3>Employee Records</h3><div class="panel-sub">${sub}</div></div><div class="tools">
-    <input class="search" id="empQ" placeholder="Search…" value="${esc(empSearch)}">${can("employees.edit")?'<button class="btn btn-primary" id="addEmp">+ Add employee</button>':''}</div></div>
+    <input class="search" id="empQ" placeholder="Search…" value="${esc(empSearch)}">${can("employees.edit")?'<button class="btn btn-light" id="pwRotBtn">Password rotation</button><button class="btn btn-primary" id="addEmp">+ Add employee</button>':''}</div></div>
     <div style="padding:0 18px">${tabs}</div>
     ${list.length?`<div style="overflow-x:auto"><table><thead><tr><th>Employee</th><th>Role</th>${payTh}<th>Gov't IDs</th><th>Status</th><th></th></tr></thead><tbody>
     ${list.map(e=>`<tr data-focus="${e.id}"${empActive(e)?"":' style="opacity:.55"'}><td><div style="display:flex;align-items:center;gap:10px">${e.photo?`<img src="${e.photo}" style="height:38px;width:38px;object-fit:cover;border-radius:50%;border:1px solid var(--line)">`:`<div style="height:38px;width:38px;border-radius:50%;background:var(--brand);color:#fff;display:flex;align-items:center;justify-content:center;font-weight:700;font-size:13px">${esc((e.name||"?").split(" ").map(x=>x[0]).slice(0,2).join("").toUpperCase())}</div>`}<div><b>${esc(e.name)}</b><div style="font-size:11px;color:var(--muted)">${esc(e.email)}</div></div></div></td>
@@ -2987,6 +3062,7 @@ function viewEmployees(){
   document.getElementById("empQ").oninput=e=>{empSearch=e.target.value;viewEmployees();};
   const _sf=document.getElementById("empStatusFilter");if(_sf)_sf.onchange=e=>{empStatusFilter=e.target.value;viewEmployees();};
   if(can("employees.edit"))document.getElementById("addEmp").onclick=()=>employeeForm();
+  {const _pr=document.getElementById("pwRotBtn");if(_pr)_pr.onclick=()=>pwRotationStatus();}
   V().querySelectorAll("[data-edit]").forEach(b=>b.onclick=()=>employeeForm(b.dataset.edit));
   V().querySelectorAll("[data-prof]").forEach(b=>b.onclick=()=>openEmployee201(b.dataset.prof));
   V().querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>delEmployee(b.dataset.del));
@@ -3152,7 +3228,13 @@ function employeeForm(id){
       basic:+gv("f_basic")||0,payFreq:gv("f_freq"),sss:gv("f_sss"),philhealth:gv("f_phil"),pagibig:gv("f_pagibig"),tin:gv("f_tin"),photo:_empPhoto,bioId:gv("f_bio")};
     let _target;
     if(id){Object.assign(e,d);_target=e;await logAudit("update","employee",name,"Edited");}else{_target={id:uid(),...d};DB.employees.push(_target);await logAudit("create","employee",name,"Added");}
-    if(_pw.trim())await pwSet(_target,_pw.trim());   /* hash & store; never plaintext */
+    if(_pw.trim()){
+      await pwSet(_target,_pw.trim());   /* hash & store; never plaintext */
+      /* Admin-set passwords are temporary by definition: the owner must replace it at
+         next login. Setting your OWN password here counts as rotated. */
+      if(typeof user!=="undefined"&&user&&user.id===_target.id)_target.pwRotated=todayStr();
+      else delete _target.pwRotated;
+    }
     /* Labor: push the edited daily rate back to Payroll → Rate so both agree. */
     if(document.getElementById("f_dbasic")){
       const nb=+gv("f_dbasic")||0,nt=+gv("f_dtitle")||0,nr=nb+nt;
