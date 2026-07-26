@@ -13,7 +13,7 @@ the SQLite backend, so there is only one copy to maintain.
 SETUP
 -----
   1. Install PostgreSQL and create a database, e.g. "gleenergy".
-  2. pip install -r requirements.txt   AND   pip install "psycopg[binary]>=3.1"
+  2. pip install -r requirements.txt   (includes "psycopg[binary,pool]" — driver + connection pool)
   3. Set the connection string in your terminal before running:
          Windows:  set DATABASE_URL=postgresql://user:password@localhost:5432/gleenergy
          Mac/Linux: export DATABASE_URL=postgresql://user:password@localhost:5432/gleenergy
@@ -26,8 +26,9 @@ BEFORE exposing this to the internet, also set GLEENERGY_API_KEY
 """
 
 import os
-import contextlib
+import threading
 import psycopg
+from psycopg_pool import ConnectionPool
 from fastapi import FastAPI
 
 from _gleenergy_common import (
@@ -42,8 +43,16 @@ DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@lo
 app = FastAPI(title="Gleenergy API (PostgreSQL)")
 
 
-def _conn():
-    conn = psycopg.connect(DATABASE_URL)
+# One small shared pool instead of a fresh connection per request. Render's
+# smaller Postgres plans allow only a handful of connections, and the app's
+# initial load fires ~60 storage reads in a burst — per-request connects
+# exhausted the server and every request 500'd until the backends drained.
+# The pool caps us at 5 connections total and reuses them.
+_POOL = None
+_POOL_LOCK = threading.Lock()
+
+
+def _ensure_tables(conn):
     with conn.cursor() as cur:
         cur.execute(
             "CREATE TABLE IF NOT EXISTS kv ("
@@ -61,21 +70,38 @@ def _conn():
             "  expires_at DOUBLE PRECISION"
             ")"
         )
-        conn.commit()
-    return conn
+    conn.commit()
+
+
+def _pool():
+    global _POOL
+    if _POOL is None:
+        with _POOL_LOCK:
+            if _POOL is None:
+                kw = {}
+                if hasattr(ConnectionPool, "check_connection"):
+                    kw["check"] = ConnectionPool.check_connection   # ping on checkout (pool >= 3.2)
+                pool = ConnectionPool(
+                    DATABASE_URL, min_size=1, max_size=5, max_idle=300,
+                    timeout=15, open=True, kwargs={"connect_timeout": 10}, **kw,
+                )
+                with pool.connection() as conn:
+                    _ensure_tables(conn)                             # DDL once per process
+                _POOL = pool
+    return _POOL
 
 
 # --- accessors the shared auth layer needs (see install_shared) ---------
 
 def _kv_get_raw(key):
-    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+    with _pool().connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT value FROM kv WHERE key = %s", (key,))
         row = cur.fetchone()
     return row[0] if row else None
 
 
 def _sess_get(token_hash):
-    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+    with _pool().connection() as conn, conn.cursor() as cur:
         cur.execute(
             "SELECT emp_id, email, expires_at FROM sessions WHERE token_hash = %s",
             (token_hash,),
@@ -87,7 +113,7 @@ def _sess_get(token_hash):
 
 
 def _sess_put(token_hash, emp_id, email, created_at, expires_at):
-    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+    with _pool().connection() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO sessions(token_hash, emp_id, email, created_at, expires_at) "
             "VALUES(%s, %s, %s, %s, %s) "
@@ -98,19 +124,19 @@ def _sess_put(token_hash, emp_id, email, created_at, expires_at):
 
 
 def _sess_touch(token_hash, expires_at):
-    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+    with _pool().connection() as conn, conn.cursor() as cur:
         cur.execute("UPDATE sessions SET expires_at = %s WHERE token_hash = %s", (expires_at, token_hash))
         conn.commit()
 
 
 def _sess_del(token_hash):
-    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+    with _pool().connection() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM sessions WHERE token_hash = %s", (token_hash,))
         conn.commit()
 
 
 def _sess_prune(now):
-    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+    with _pool().connection() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM sessions WHERE expires_at < %s", (now,))
         conn.commit()
 
@@ -130,7 +156,7 @@ AUTH_DB = {
 
 @app.post("/api/storage/get")
 def storage_get(body: KeyBody):
-    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+    with _pool().connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT value FROM kv WHERE key = %s", (body.key,))
         row = cur.fetchone()
     if row is None:
@@ -140,7 +166,7 @@ def storage_get(body: KeyBody):
 
 @app.post("/api/storage/set")
 def storage_set(body: SetBody):
-    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+    with _pool().connection() as conn, conn.cursor() as cur:
         cur.execute(
             "INSERT INTO kv(key, value, updated_at) VALUES(%s, %s, now()) "
             "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()",
@@ -152,7 +178,7 @@ def storage_set(body: SetBody):
 
 @app.post("/api/storage/delete")
 def storage_delete(body: KeyBody):
-    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+    with _pool().connection() as conn, conn.cursor() as cur:
         cur.execute("DELETE FROM kv WHERE key = %s", (body.key,))
         conn.commit()
     return {"key": body.key, "deleted": True}
@@ -161,7 +187,7 @@ def storage_delete(body: KeyBody):
 @app.post("/api/storage/list")
 def storage_list(body: ListBody):
     prefix = body.prefix or ""
-    with contextlib.closing(_conn()) as conn, conn.cursor() as cur:
+    with _pool().connection() as conn, conn.cursor() as cur:
         cur.execute("SELECT key FROM kv WHERE key LIKE %s", (prefix + "%",))
         rows = cur.fetchall()
     return {"keys": [r[0] for r in rows]}

@@ -1,4 +1,4 @@
 fastapi>=0.110
 uvicorn[standard]>=0.29
 openpyxl>=3.1          # reads attached payroll .xlsx/.xlsm workbooks (HR → Payroll workbooks)
-psycopg[binary]>=3.1   # PostgreSQL driver — required for cloud hosting (app_postgres.py); harmless locally
+psycopg[binary,pool]>=3.1   # PostgreSQL driver + connection pool — required for cloud hosting (app_postgres.py); harmless locally

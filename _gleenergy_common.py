@@ -529,7 +529,14 @@ def install_shared(app, auth_db=None):
                 if path not in _OPEN_API_PATHS:
                     authed = _api_key_matches(request)
                     if not authed and auth_db is not None:
-                        sess = await run_in_threadpool(_session_from_request, request, auth_db)
+                        try:
+                            sess = await run_in_threadpool(_session_from_request, request, auth_db)
+                        except Exception as exc:                       # DB hiccup ≠ "not signed in"
+                            print(f"[auth] session lookup failed: {exc!r}")
+                            return JSONResponse(
+                                {"ok": False, "error": "The database is briefly unavailable — please retry."},
+                                status_code=503,
+                            )
                         if sess:
                             authed = True
                             request.state.session = sess
@@ -560,7 +567,14 @@ def install_shared(app, auth_db=None):
                 {"ok": False, "error": "Too many sign-in attempts — please wait 10 minutes and try again."},
                 status_code=429,
             )
-        emp, roster_missing = _find_employee(auth_db["kv_get"], email)
+        try:
+            emp, roster_missing = _find_employee(auth_db["kv_get"], email)
+        except Exception as exc:
+            print(f"[auth] login roster read failed: {exc!r}")
+            return JSONResponse(
+                {"ok": False, "error": "The database is briefly unavailable — please try again in a moment."},
+                status_code=503,
+            )
         # Brand-new empty database: let the seed Super Admin in once so the app
         # can initialise itself. Never triggers once p2:employees exists.
         bootstrap = roster_missing and email == "ceo@solar" and password == "demo123"
@@ -580,8 +594,15 @@ def install_shared(app, auth_db=None):
         token = secrets.token_urlsafe(32)
         th = _token_hash(token)
         emp_id = emp["id"] if emp else "e0"
-        auth_db["sess_prune"](now)
-        auth_db["sess_put"](th, emp_id, email, now, now + SESSION_TTL)
+        try:
+            auth_db["sess_prune"](now)
+            auth_db["sess_put"](th, emp_id, email, now, now + SESSION_TTL)
+        except Exception as exc:
+            print(f"[auth] session write failed: {exc!r}")
+            return JSONResponse(
+                {"ok": False, "error": "The database is briefly unavailable — please try again in a moment."},
+                status_code=503,
+            )
         resp = JSONResponse({"ok": True, "empId": emp_id, "email": email})
         resp.set_cookie(SESSION_COOKIE, token, max_age=SESSION_TTL, httponly=True,
                         samesite="lax", secure=_is_https(request), path="/")
@@ -589,7 +610,11 @@ def install_shared(app, auth_db=None):
 
     @app.get("/api/auth/me")
     def auth_me(request: Request):
-        sess = _session_from_request(request, auth_db) if auth_db is not None else None
+        try:
+            sess = _session_from_request(request, auth_db) if auth_db is not None else None
+        except Exception as exc:
+            print(f"[auth] /me lookup failed: {exc!r}")
+            sess = None
         if not sess:
             return {"ok": False}
         return {"ok": True, "empId": sess["emp_id"], "email": sess["email"]}
@@ -601,6 +626,8 @@ def install_shared(app, auth_db=None):
             th = _token_hash(token)
             try:
                 auth_db["sess_del"](th)
+            except Exception as exc:
+                print(f"[auth] logout session delete failed: {exc!r}")
             finally:
                 _SESS_CACHE.pop(th, None)
         resp = JSONResponse({"ok": True})

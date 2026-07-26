@@ -1339,6 +1339,12 @@ async function logAudit(action,entity,name,detail){
 
 /* ============ init ============ */
 async function init(){
+  /* Connectivity gate: this first read is NOT allowed to fail silently. If the
+     server/database is unreachable, every loadKey below would "fall back" to
+     seed data and then try to SAVE it over the real keys — so a failed read
+     must abort the whole load instead. A missing key (null, fresh install) is
+     fine and does not throw. */
+  await window.storage.get(K.rbac,true);
   DB.rbac=await loadKey(K.rbac,null)||(await saveKey(K.rbac,defaultRbac()),defaultRbac());
   DB.employees=await loadKey(K.emp,null)||(await saveKey(K.emp,seedEmployees()),seedEmployees());
   DB.clients=await loadKey(K.cli,null)||(await saveKey(K.cli,seedClients()),seedClients());
@@ -1695,7 +1701,8 @@ async function doLogin(){
   if(!r.ok||!res.ok){err.textContent=(res&&res.error)||"That email or password doesn't match. Please try again.";return;}
   window._authExpiredOnce=false;
   err.textContent="Loading…";
-  await init();
+  try{await init();}
+  catch(e){err.textContent="Signed in, but your data could not be loaded — please try again in a moment.";return;}
   const f=DB.employees.find(e=>e.id===res.empId)||DB.employees.find(e=>e.email.toLowerCase()===email);
   if(!f||!empActive(f)){err.textContent="This account is inactive — please contact your administrator.";return;}
   if(f.passHash&&f.pass!=null){delete f.pass;await saveKey(K.emp,DB.employees);}   /* drop any lingering plaintext */
@@ -9882,7 +9889,8 @@ async function boot(){
   let me=null;
   try{const r=await fetch("/api/auth/me");me=await r.json();}catch(e){me=null;}
   if(me&&me.ok){
-    await init();
+    try{await init();}
+    catch(e){const err=document.getElementById("liErr");if(err)err.textContent="Could not load your data — please refresh to try again.";return;}
     const u=DB.employees.find(e=>e.id===me.empId&&empActive(e))
           ||DB.employees.find(e=>e.email&&e.email.toLowerCase()===String(me.email||"").toLowerCase()&&empActive(e));
     if(u){
