@@ -57,6 +57,30 @@ Nothing about editing changes. The loop is:
 
 Rolling back = redeploy any previous commit from the Render dashboard.
 
+## Part 4 — Custom domain (GoDaddy or any registrar)
+
+1. Deploy first, so `https://gleenergy-erp.onrender.com` works.
+2. Buy the domain (e.g. at GoDaddy). Recommended: use a subdomain such as
+   `erp.yourdomain.com` — it connects with one CNAME and leaves the root
+   domain free for a future company website.
+3. In **Render**: web service → Settings → **Custom Domains** → Add →
+   `erp.yourdomain.com`. Render shows the DNS target to use.
+4. In **GoDaddy**: My Products → the domain → **DNS** → Add record:
+   - Type: `CNAME` · Name: `erp` · Value: `gleenergy-erp.onrender.com` · TTL: default
+   (For a bare/root domain, Render will show an A-record value instead —
+   enter it in GoDaddy the same way.)
+5. Wait for DNS propagation (minutes to a day). Render verifies the record and
+   **issues the HTTPS certificate automatically** — nothing to buy or renew.
+6. Crew re-add their home-screen icon from the new address.
+
+## Database & SQL notes
+
+There is no manual SQL in this stack. The app is a key-value store with two
+interchangeable backends: SQLite locally, PostgreSQL in the cloud
+(`app_postgres.py` creates its own tables on first startup). Data migrates via
+the app's Full Backup → Restore, not a SQL dump. Render backs up PostgreSQL
+daily; additionally download an in-app Full Backup monthly as an offline copy.
+
 ## Security notes
 
 - HTTPS is automatic and enforced by Render.
