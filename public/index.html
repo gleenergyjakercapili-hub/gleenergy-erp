@@ -973,7 +973,7 @@
    outside the connector guard so the email/SMS calls below can use it too. */
 window.gleenergyHeaders=function(){
   const h={"Content-Type":"application/json"};
-  if(window.GLEENERGY_API_KEY) h["J5OmLkhVOjr/+4qCBeeUioS6nso12tmnAPiTd0Jqaxo="]=window.GLEENERGY_API_KEY;
+  if(window.GLEENERGY_API_KEY) h["X-API-Key"]=window.GLEENERGY_API_KEY;
   return h;
 };
 if(typeof window.storage==="undefined"){
