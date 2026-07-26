@@ -1,0 +1,25 @@
+# Render.com blueprint — deploys the Gleenergy ERP with HTTPS + managed PostgreSQL.
+# In Render: New → Blueprint → pick this repository. Render reads this file and
+# creates both services below, wires DATABASE_URL automatically, and issues the
+# HTTPS certificate for the generated .onrender.com URL.
+services:
+  - type: web
+    name: gleenergy-erp
+    runtime: python
+    region: singapore            # nearest region to the Philippines
+    plan: starter                # keeps the app always-on (free tier sleeps after idle)
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app_postgres:app --host 0.0.0.0 --port $PORT
+    autoDeploy: true             # every push to the repo redeploys automatically
+    envVars:
+      - key: DATABASE_URL
+        fromDatabase:
+          name: gleenergy-db
+          property: connectionString
+      - key: GLEENERGY_API_KEY
+        generateValue: true      # shields the storage API from direct scanners
+
+databases:
+  - name: gleenergy-db
+    plan: basic-256mb
+    region: singapore

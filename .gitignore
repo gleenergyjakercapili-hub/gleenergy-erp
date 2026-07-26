@@ -1,0 +1,17 @@
+# NEVER commit live company data — the database holds real staff records.
+data/
+*.db
+
+# Secrets and internal notes — plaintext credentials, tokens, IPs, mail/SMS keys.
+credentials/
+notes/
+config/
+docs/Share IP ADDRESS.txt
+
+# Python
+__pycache__/
+*.pyc
+
+# Local editor/OS noise
+.DS_Store
+Thumbs.db
