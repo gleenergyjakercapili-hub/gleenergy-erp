@@ -27,6 +27,14 @@
   body{font-family:var(--font);color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
   button{font-family:var(--font);cursor:pointer}
   .hide{display:none !important}
+  /* Boot splash — sits above everything until boot() decides login vs dashboard */
+  #bootSplash{position:fixed;inset:0;z-index:10000;background:linear-gradient(160deg,#3b2a6d,#6d28d9);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;transition:opacity .28s ease}
+  #bootSplash.bs-off{opacity:0;pointer-events:none}
+  .boot-dots{display:flex;gap:8px}
+  .boot-dots span{width:9px;height:9px;border-radius:50%;background:#fff;opacity:.5;animation:bootDot 1s infinite ease-in-out}
+  .boot-dots span:nth-child(2){animation-delay:.15s}
+  .boot-dots span:nth-child(3){animation-delay:.3s}
+  @keyframes bootDot{0%,100%{transform:translateY(0);opacity:.45}50%{transform:translateY(-6px);opacity:1}}
 
   #login{min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;
     background:radial-gradient(900px 500px at 80% -10%,rgba(84,48,158,.35),transparent 60%),
@@ -911,6 +919,19 @@
 </style>
 </head>
 <body>
+
+<!-- Boot splash: covers the screen until the app knows whether to show the
+     sign-in form or resume straight into the dashboard, so neither one
+     flashes and vanishes during a refresh. -->
+<div id="bootSplash">
+  <div class="brand-logo" style="width:250px;height:54px;background-color:#fff;border-radius:8px;padding:5px 10px;box-sizing:border-box"></div>
+  <div class="boot-dots"><span></span><span></span><span></span></div>
+</div>
+<script>
+/* Standalone safety net: if the main script ever fails to run, the splash must
+   not brick the page — reveal whatever is underneath after 15s. */
+setTimeout(function(){var b=document.getElementById("bootSplash");if(b&&!window._bootDone)b.style.display="none";},15000);
+</script>
 
 <div id="login">
   <div class="solar-bg" aria-hidden="true">
@@ -9890,6 +9911,12 @@ if("serviceWorker" in navigator){try{navigator.serviceWorker.register("sw.js").c
 /* ===== boot: ask the server who is signed in BEFORE loading any data =====
    Valid session cookie → load everything and resume straight into the app.
    No session → just show the login form; the database stays untouched. */
+function hideBootSplash(){
+  window._bootDone=true;
+  const b=document.getElementById("bootSplash");if(!b)return;
+  b.classList.add("bs-off");
+  setTimeout(()=>{if(b.parentNode)b.parentNode.removeChild(b);},400);
+}
 async function boot(){
   clearSession();   /* pre-session-auth localStorage leftover */
   let me=null;
@@ -9908,7 +9935,10 @@ async function boot(){
     try{await fetch("/api/auth/logout",{method:"POST"});}catch(e){}
   }
 }
-boot();
+/* Whatever path boot() takes — resume into the app, land on the login form, or
+   fail loading — the splash comes down exactly once, when the destination is
+   actually ready. No more login-card flash on refresh. */
+boot().finally(hideBootSplash);
 </script>
 </body>
 </html>
