@@ -481,6 +481,11 @@
   .pages{display:flex;flex-direction:column;align-items:center;gap:22px;padding:24px}
   .page{width:210mm;background:#fff;color:var(--ink);padding:13mm 13mm 0;box-shadow:0 12px 40px rgba(0,0,0,.3);display:flex;flex-direction:column}
   .page-inner{flex:1;display:flex;flex-direction:column}
+  /* Wide report tables inside print sheets: fixed layout + compact cells so
+     many-column reports (e.g. Project Information) always fit the page. */
+  .pi-tbl{table-layout:fixed;width:100%}
+  .pi-tbl th{padding:7px 6px;font-size:8.5px;letter-spacing:.04em;white-space:normal}
+  .pi-tbl td{padding:6px;font-size:9.5px;word-break:break-word;vertical-align:top;border-bottom:1px solid #eee}
   .page.ppage{min-height:297mm}
   .ppage .foot{margin-top:auto}
   .brandbar{display:flex;align-items:center;justify-content:center;gap:12px;padding-bottom:8px}
@@ -4337,7 +4342,7 @@ function printProjInfo(list){
   printDoc("Project Information",`<div class="page"><div class="page-inner">${printHeader("PROJECT INFORMATION")}
    <div class="kv"><div class="r"><span>As of</span><span>:</span><span class="v brand">${esc(todayStr())}</span></div>
    <div class="r"><span>Prepared by</span><span>:</span><span class="v">${esc((user&&user.name)||"")}</span></div></div>
-   <table style="margin-top:12px;font-size:9.5px"><thead><tr><th>Client</th><th>Site</th><th>Contact</th><th style="text-align:right">Contract</th><th style="text-align:right">Actual exp.</th><th>Started</th><th>Target</th><th>Completed</th><th>Engr / Sales</th><th>Status</th></tr></thead><tbody>
+   <table class="pi-tbl" style="margin-top:12px"><colgroup><col style="width:14%"><col style="width:13%"><col style="width:12%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:11%"><col style="width:8%"></colgroup><thead><tr><th>Client</th><th>Site</th><th>Contact</th><th style="text-align:right">Contract</th><th style="text-align:right">Actual exp.</th><th>Started</th><th>Target</th><th>Completed</th><th>Engr / Sales</th><th>Status</th></tr></thead><tbody>
    ${list.map(p=>{const cl=projClient(p),sp=projSpend(p),st=projInfoStatus(p);
      return `<tr><td><b>${esc(p.clientName||"")}</b><br><span style="color:#666">${esc(p.name||"")}</span></td>
       <td>${esc(p.siteName||(cl&&cl.address)||"")}</td><td>${esc(projContactStr(cl))}</td>
