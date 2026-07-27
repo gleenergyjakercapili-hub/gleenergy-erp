@@ -15,20 +15,46 @@
 <meta name="apple-mobile-web-app-title" content="Gleenergy">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Montserrat:ital,wght@0,400;0,500;0,600;0,700;0,800;1,400;1,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
+  /* ============================================================
+     GLEENERGY DESIGN SYSTEM — the single source of visual truth.
+     Every screen styles itself through these tokens; change them
+     here and the whole app (desktop + mobile) follows.
+
+     Palette   deep violet brand + old-gold accent on warm neutrals
+     Type      Montserrat (display/headings) + Inter (UI/body/tables)
+     Spacing   4px base scale (--sp-1..--sp-6)
+     Radius    10 / 14 / 18  (controls, cards, sheets)
+     Elevation 3 layered soft shadows, violet-tinted — never harsh
+     ============================================================ */
   :root{
-    --brand:#502e8a;--brand-2:#6f2c8f;--brand-dark:#321a5e;--accent:#faa31e;
-    --red:#d12b2b;--ok:#1f9d57;--ink:#1c1c22;--muted:#7a7790;--line:#e7e4ef;
-    --bg:#f1eff7;--card:#ffffff;--font:"Montserrat",sans-serif;--display:"Montserrat",var(--font);
+    /* brand */
+    --brand:#4b2a85;--brand-2:#6d3fa9;--brand-dark:#2a1854;--accent:#dfa32e;
+    /* status */
+    --red:#c62f2f;--ok:#1b8f50;--warn:#b97b12;--info:#2f5fc0;
+    /* neutrals */
+    --ink:#191926;--muted:#6f6c85;--line:#e6e3f0;--bg:#f4f2f9;--card:#ffffff;
+    /* type */
+    --font:"Inter","Montserrat",sans-serif;--display:"Montserrat",var(--font);
+    /* spacing scale (4px base) */
+    --sp-1:4px;--sp-2:8px;--sp-3:12px;--sp-4:16px;--sp-5:24px;--sp-6:32px;
+    /* radii */
+    --r-sm:10px;--r-md:14px;--r-lg:18px;
+    /* elevation */
+    --shadow-sm:0 1px 3px rgba(42,24,84,.07);
+    --shadow-md:0 6px 22px rgba(42,24,84,.10);
+    --shadow-lg:0 22px 60px rgba(42,24,84,.24);
   }
   *{box-sizing:border-box}
   html,body{margin:0;height:100%}
   body{font-family:var(--font);color:var(--ink);background:var(--bg);-webkit-font-smoothing:antialiased}
+  /* display face for structure, UI face for content — the premium pairing */
+  h1,h2,h3,.sec-h{font-family:var(--display);letter-spacing:-.01em}
   button{font-family:var(--font);cursor:pointer}
   .hide{display:none !important}
   /* Boot splash — sits above everything until boot() decides login vs dashboard */
-  #bootSplash{position:fixed;inset:0;z-index:10000;background:linear-gradient(160deg,#3b2a6d,#6d28d9);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;transition:opacity .28s ease}
+  #bootSplash{position:fixed;inset:0;z-index:10000;background:linear-gradient(160deg,var(--brand-dark),var(--brand-2));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;transition:opacity .28s ease}
   #bootSplash.bs-off{opacity:0;pointer-events:none}
   .boot-dots{display:flex;gap:8px}
   .boot-dots span{width:9px;height:9px;border-radius:50%;background:#fff;opacity:.5;animation:bootDot 1s infinite ease-in-out}
@@ -87,8 +113,12 @@
     text-align:left;padding:10px 12px;border-radius:9px;font-size:13.5px;font-weight:600;width:100%}
   .nav button:hover{background:rgba(255,255,255,.1);color:#fff}
   .nav button.active{background:var(--accent);color:#3a2a00}
-  .nav .ico{width:26px;height:26px;border-radius:8px;background:#fff;box-shadow:0 1px 3px rgba(0,0,0,.18);display:flex;align-items:center;justify-content:center;flex:none}
-  .nav .ico svg{width:17px;height:17px}
+  /* one icon language everywhere: outline strokes that inherit currentColor,
+     so state (rest / hover / active) is pure CSS and always consistent */
+  .nav .ico{width:26px;height:26px;border-radius:8px;background:rgba(255,255,255,.12);color:rgba(255,255,255,.92);display:flex;align-items:center;justify-content:center;flex:none;transition:background .15s}
+  .nav .ico svg{width:16px;height:16px}
+  .nav button:hover .ico{background:rgba(255,255,255,.2)}
+  .nav button.active .ico{background:rgba(42,24,84,.16);color:#2a1854}
   .nav .badge{margin-left:auto;background:var(--red);color:#fff;font-size:10px;font-weight:800;border-radius:10px;padding:1px 7px}
   /* --- grouped navigation: labeled, collapsible sections --- */
   .nav .grp{display:flex;flex-direction:column;gap:3px}
@@ -1762,31 +1792,34 @@ window._authExpired=function(){
 };
 
 /* ============ nav ============ */
+/* Design-system iconography: one outline language, 24x24, 1.8px stroke,
+   round caps, currentColor — state (rest/hover/active) is pure CSS. */
+const _NI=(p)=>'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+p+'</svg>';
 const NAVI={
- dashboard:'<svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="2" fill="#6366f1"/><rect x="13" y="3" width="8" height="8" rx="2" fill="#a5b4fc"/><rect x="3" y="13" width="8" height="8" rx="2" fill="#a5b4fc"/><rect x="13" y="13" width="8" height="8" rx="2" fill="#6366f1"/></svg>',
- clients:'<svg viewBox="0 0 24 24"><g fill="#14b8a6"><circle cx="16.6" cy="8.9" r="2.7"/><path d="M11.6 19.2v-.6a5 5 0 0 1 10 0v.6z"/></g><g fill="#7c5cff"><circle cx="8.4" cy="8" r="3.4"/><path d="M2.4 19.3v-.8a6 6 0 0 1 12 0v.8z"/></g></svg>',
- proposals:'<svg viewBox="0 0 24 24"><path d="M6 2.4h7l5 5V20a1.6 1.6 0 0 1-1.6 1.6H6A1.6 1.6 0 0 1 4.4 20V4A1.6 1.6 0 0 1 6 2.4z" fill="#fff" stroke="#a78bfa" stroke-width="1.5"/><path d="M13 2.4V7.6h5" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-linejoin="round"/><rect x="7.5" y="11.6" width="9" height="1.7" rx="0.8" fill="#7c3aed"/><rect x="7.5" y="14.8" width="9" height="1.7" rx="0.8" fill="#c4b5fd"/></svg>',
- followups:'<svg viewBox="0 0 24 24" fill="none" stroke-linecap="round" stroke-linejoin="round" stroke-width="2.4"><path d="M20 11.5A8 8 0 0 0 6.3 6.3L3.5 9" stroke="#16a34a"/><path d="M4 12.5A8 8 0 0 0 17.7 17.7L20.5 15" stroke="#0d9488"/><path d="M3.5 4v5h5" stroke="#16a34a"/><path d="M20.5 20v-5h-5" stroke="#0d9488"/></svg>',
- survey:'<svg viewBox="0 0 24 24"><rect x="4.5" y="4" width="15" height="17" rx="2.5" fill="#fcd34d"/><rect x="8.5" y="2.5" width="7" height="4" rx="1.4" fill="#d97706"/><path d="M8.6 13l2.4 2.4 4.6-4.8" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
- projects:'<svg viewBox="0 0 24 24"><defs><linearGradient id="nv-pan" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7aa8f7"/><stop offset="1" stop-color="#2f5fc0"/></linearGradient></defs><rect x="3" y="4.3" width="18" height="11" rx="1" fill="url(#nv-pan)" stroke="#214a9c" stroke-width="0.9"/><g stroke="#d3e3fc" stroke-width="0.8" opacity=".9"><line x1="9" y1="4.3" x2="9" y2="15.3"/><line x1="15" y1="4.3" x2="15" y2="15.3"/><line x1="3" y1="8" x2="21" y2="8"/><line x1="3" y1="11.6" x2="21" y2="11.6"/></g><rect x="11" y="15.3" width="2" height="4" fill="#9aa3b8"/><rect x="7.8" y="19.3" width="8.4" height="2.1" rx="1" fill="#6b7388"/></svg>',
- inventory:'<svg viewBox="0 0 24 24"><path d="M3.5 8.3 12 4.3l8.5 4-8.5 4z" fill="#f59e0b"/><path d="M3.5 8.3v7.4L12 19.7V12.3z" fill="#b45309"/><path d="M20.5 8.3v7.4L12 19.7V12.3z" fill="#d97706"/></svg>',
- purchasing:'<svg viewBox="0 0 24 24" fill="none" stroke="#0d9488" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9.5" cy="20" r="1.6" fill="#0d9488"/><circle cx="18" cy="20" r="1.6" fill="#0d9488"/><path d="M2 3h2.4l2.3 12.4a1.6 1.6 0 0 0 1.6 1.3h9a1.6 1.6 0 0 0 1.6-1.3L21 7H5.5"/></svg>',
- permits:'<svg viewBox="0 0 24 24"><path d="M12 2.5 5 5.2V11c0 4.6 3 7.9 7 9.5 4-1.6 7-4.9 7-9.5V5.2z" fill="#22c55e"/><path d="M9 11.5l2 2 4-4" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
- aftersales:'<svg viewBox="0 0 24 24" fill="none"><path d="M4 13v-1a8 8 0 0 1 16 0v1" stroke="#2563eb" stroke-width="2.2" stroke-linecap="round"/><rect x="2.4" y="12.6" width="4.2" height="6.4" rx="1.8" fill="#3b82f6"/><rect x="17.4" y="12.6" width="4.2" height="6.4" rx="1.8" fill="#3b82f6"/><path d="M20 19a3 3 0 0 1-3 3h-2" stroke="#2563eb" stroke-width="2.2" stroke-linecap="round"/></svg>',
- schedule:'<svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15.5" rx="2.5" fill="#f87171"/><rect x="3.5" y="5" width="17" height="4.6" rx="2.5" fill="#dc2626"/><path d="M8 2.8v3.4M16 2.8v3.4" stroke="#dc2626" stroke-width="2.2" stroke-linecap="round"/><circle cx="9" cy="14" r="1.3" fill="#fff"/><circle cx="15" cy="14" r="1.3" fill="#fff"/></svg>',
- tasks:'<svg viewBox="0 0 24 24"><rect x="3.5" y="3.5" width="17" height="17" rx="4" fill="#22c55e"/><path d="M8.4 12l2.5 2.5 4.7-5" fill="none" stroke="#fff" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>',
- joborders:'<svg viewBox="0 0 24 24"><rect x="4.5" y="3" width="15" height="18" rx="2.5" fill="#f59e0b"/><rect x="8.5" y="1.8" width="7" height="3.4" rx="1.4" fill="#b45309"/><path d="M8 10h8M8 13.5h8M8 17h5" stroke="#fff" stroke-width="1.9" stroke-linecap="round"/></svg>',
- sops:'<svg viewBox="0 0 24 24"><rect x="4.5" y="3" width="15" height="18" rx="2.5" fill="#0ea5a3"/><circle cx="8.3" cy="8" r="1.3" fill="#fff"/><circle cx="8.3" cy="12" r="1.3" fill="#fff"/><circle cx="8.3" cy="16" r="1.3" fill="#fff"/><path d="M11.4 8h5M11.4 12h5M11.4 16h4" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/></svg>',
- attendance:'<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9" fill="#818cf8"/><path d="M12 7.4V12l3 1.8" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
- claims:'<svg viewBox="0 0 24 24"><path d="M5 2.5h14v19l-2.3-1.6-2.3 1.6-2.4-1.6L9.6 21l-2.3-1.6L5 21z" fill="#ec4899"/><path d="M9 8h6M9 12h6" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>',
- finance:'<svg viewBox="0 0 24 24"><ellipse cx="10" cy="6.5" rx="6" ry="2.9" fill="#fcd34d"/><path d="M4 6.5v4c0 1.6 2.7 2.9 6 2.9s6-1.3 6-2.9v-4" fill="#f59e0b"/><ellipse cx="10" cy="6.5" rx="6" ry="2.9" fill="#fcd34d"/><ellipse cx="14" cy="13.5" rx="6" ry="2.9" fill="#fde68a"/><path d="M8 13.5v4c0 1.6 2.7 2.9 6 2.9s6-1.3 6-2.9v-4" fill="#f59e0b"/><ellipse cx="14" cy="13.5" rx="6" ry="2.9" fill="#fcd34d"/></svg>',
- commissions:'<svg viewBox="0 0 24 24" fill="none" stroke="#f97316" stroke-width="2.4" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><circle cx="7.5" cy="7.5" r="2.3" fill="#fdba74"/><circle cx="16.5" cy="16.5" r="2.3" fill="#fdba74"/></svg>',
- accounting:'<svg viewBox="0 0 24 24"><rect x="5" y="2.5" width="14" height="19" rx="2.5" fill="#8b5cf6"/><rect x="7.5" y="5" width="9" height="3.6" rx="1" fill="#ede9fe"/><g fill="#ede9fe"><circle cx="9" cy="12" r="1.1"/><circle cx="12" cy="12" r="1.1"/><circle cx="15" cy="12" r="1.1"/><circle cx="9" cy="15.5" r="1.1"/><circle cx="12" cy="15.5" r="1.1"/><circle cx="15" cy="15.5" r="1.1"/><circle cx="9" cy="19" r="1.1"/><circle cx="12.5" cy="19" r="1.1"/></g></svg>',
- payroll:'<svg viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="13" rx="2.5" fill="#14b8a6"/><rect x="14.2" y="11" width="6.8" height="4" rx="2" fill="#0f766e"/><circle cx="17" cy="13" r="1" fill="#fff"/></svg>',
- employees:'<svg viewBox="0 0 24 24"><rect x="3.5" y="4.5" width="17" height="16" rx="3" fill="#3b82f6"/><circle cx="9.5" cy="10.3" r="2.4" fill="#fff"/><path d="M6 16.6a3.5 3.5 0 0 1 7 0z" fill="#fff"/><rect x="14.3" y="9" width="4.2" height="1.8" rx="0.9" fill="#bfdbfe"/><rect x="14.3" y="12.6" width="4.2" height="1.8" rx="0.9" fill="#bfdbfe"/></svg>',
- roles:'<svg viewBox="0 0 24 24"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5" fill="#64748b"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" fill="none" stroke="#475569" stroke-width="2.2"/><circle cx="12" cy="14.8" r="1.6" fill="#fff"/><rect x="11.2" y="15.3" width="1.6" height="3" rx="0.8" fill="#fff"/></svg>',
- documents:'<svg viewBox="0 0 24 24"><path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V11H3z" fill="#d97706"/><path d="M3 10h18v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" fill="#fbbf24"/></svg>',
- audit:'<svg viewBox="0 0 24 24"><rect x="3" y="3" width="18" height="18" rx="3.5" fill="#94a3b8"/><path d="M7.5 8h9M7.5 12h9M7.5 16h6" stroke="#fff" stroke-width="2" stroke-linecap="round"/></svg>'
+ dashboard:_NI('<rect x="3.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="3.5" width="7" height="7" rx="1.5"/><rect x="3.5" y="13.5" width="7" height="7" rx="1.5"/><rect x="13.5" y="13.5" width="7" height="7" rx="1.5"/>'),
+ clients:_NI('<circle cx="9" cy="8" r="3.2"/><path d="M3.5 20v-1a5.5 5.5 0 0 1 11 0v1"/><circle cx="17" cy="9" r="2.4"/><path d="M16.5 20h4v-.8a4.3 4.3 0 0 0-5.5-4.1"/>'),
+ proposals:_NI('<path d="M13.5 3H7a1.5 1.5 0 0 0-1.5 1.5v15A1.5 1.5 0 0 0 7 21h10a1.5 1.5 0 0 0 1.5-1.5V8z"/><path d="M13.5 3v5h5"/><path d="M9 13h6M9 16.5h6"/>'),
+ followups:_NI('<path d="M20 11.5A8 8 0 0 0 6.3 6.3L3.5 9"/><path d="M4 12.5A8 8 0 0 0 17.7 17.7L20.5 15"/><path d="M3.5 4v5h5"/><path d="M20.5 20v-5h-5"/>'),
+ survey:_NI('<path d="M9 3h6v3H9z"/><path d="M15 4h2.5A1.5 1.5 0 0 1 19 5.5v14a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 19.5v-14A1.5 1.5 0 0 1 6.5 4H9"/><path d="M9 13.5l2.2 2.2 4-4.4"/>'),
+ projects:_NI('<path d="M4.5 6h15l1.5 9h-18z"/><path d="M8.5 6l-.8 9M15.5 6l.8 9M3.7 10.5h16.6"/><path d="M12 15v4M8.5 19h7"/>'),
+ inventory:_NI('<path d="M21 8.5v9l-9 4-9-4v-9"/><path d="M3 8.5l9-4 9 4-9 4z"/><path d="M12 12.5V21"/>'),
+ purchasing:_NI('<circle cx="9.5" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2.5 3.5h2.4l2.3 12.4a1.6 1.6 0 0 0 1.6 1.3h9a1.6 1.6 0 0 0 1.6-1.3L21.5 7.5H5.5"/>'),
+ permits:_NI('<path d="M12 2.8 5 5.5v5.6c0 4.5 3 7.7 7 9.3 4-1.6 7-4.8 7-9.3V5.5z"/><path d="M9 11.6l2 2 4-4"/>'),
+ aftersales:_NI('<path d="M4 13.5v-1.5a8 8 0 0 1 16 0v1.5"/><rect x="2.8" y="13" width="4" height="6" rx="1.8"/><rect x="17.2" y="13" width="4" height="6" rx="1.8"/><path d="M20 19a3 3 0 0 1-3 3h-2.5"/>'),
+ schedule:_NI('<rect x="3.5" y="5" width="17" height="15.5" rx="2"/><path d="M8 2.8v3.4M16 2.8v3.4M3.5 10h17"/>'),
+ tasks:_NI('<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M8.4 12l2.5 2.5 4.7-5"/>'),
+ joborders:_NI('<path d="M9 3h6v3H9z"/><path d="M15 4h2.5A1.5 1.5 0 0 1 19 5.5v14a1.5 1.5 0 0 1-1.5 1.5h-11A1.5 1.5 0 0 1 5 19.5v-14A1.5 1.5 0 0 1 6.5 4H9"/><path d="M9 11.5h6M9 15h6M9 18.5h4"/>'),
+ sops:_NI('<path d="M8 6h12M8 12h12M8 18h9"/><circle cx="4.2" cy="6" r="1.2"/><circle cx="4.2" cy="12" r="1.2"/><circle cx="4.2" cy="18" r="1.2"/>'),
+ attendance:_NI('<circle cx="12" cy="12" r="8.5"/><path d="M12 7.5V12l3 1.8"/>'),
+ claims:_NI('<path d="M5 3h14v18l-2.3-1.6-2.3 1.6-2.4-1.6L9.6 21l-2.3-1.6L5 21z"/><path d="M9 8.5h6M9 12.5h6"/>'),
+ finance:_NI('<rect x="2.8" y="6.5" width="18.4" height="11" rx="2"/><circle cx="12" cy="12" r="2.6"/><path d="M6.2 9.8h.01M17.8 14.2h.01"/>'),
+ commissions:_NI('<line x1="18.5" y1="5.5" x2="5.5" y2="18.5"/><circle cx="7.8" cy="7.8" r="2.3"/><circle cx="16.2" cy="16.2" r="2.3"/>'),
+ accounting:_NI('<rect x="5" y="2.8" width="14" height="18.4" rx="2"/><path d="M8.5 6.5h7"/><path d="M8.5 11h.01M12 11h.01M15.5 11h.01M8.5 14.5h.01M12 14.5h.01M15.5 14.5h.01M8.5 18h.01M12 18h.01M15.5 18h.01"/>'),
+ payroll:_NI('<rect x="3" y="6" width="18" height="13" rx="2.5"/><path d="M3 10.5h18M16.8 15h.01"/>'),
+ employees:_NI('<rect x="3.5" y="4.5" width="17" height="16" rx="2.5"/><circle cx="9.3" cy="10.5" r="2.2"/><path d="M6 16.5a3.4 3.4 0 0 1 6.6 0"/><path d="M14.5 9.5h4M14.5 13h4"/>'),
+ roles:_NI('<rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/><path d="M12 14.5v2.5"/>'),
+ documents:_NI('<path d="M3 7a2 2 0 0 1 2-2h4l2 2.5h8a2 2 0 0 1 2 2V17a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>'),
+ audit:_NI('<rect x="3.5" y="3.5" width="17" height="17" rx="3"/><path d="M7.5 8h9M7.5 12h9M7.5 16h6"/>')
 };
 const NAVS=[["dashboard",NAVI.dashboard,"Dashboard","dashboard.view"],["clients",NAVI.clients,"Clients / CRM","clients.view"],
   ["proposals",NAVI.proposals,"Proposals","proposals.view"],["followups",NAVI.followups,"Follow-ups","followups.view"],["survey",NAVI.survey,"Site Survey","survey.view"],
