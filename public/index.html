@@ -955,7 +955,7 @@
         <div class="meta" style="text-align:right"><b id="whoName"></b><span id="whoRole"></span></div>
         <div class="notif-wrap"><button class="notif-btn" id="notifBtn" title="Notifications" aria-label="Notifications"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.73 21a2 2 0 0 1-3.46 0"/></svg><span class="notif-badge hide" id="notifBadge">0</span></button><div class="notif-panel hide" id="notifPanel"></div></div>
         <div class="av" id="whoAv" title="My account"></div>
-        <button class="btn btn-light" id="changePwBtn" title="Change my password">Password</button>
+        <button class="btn btn-light" id="changePwBtn" title="Change my password — passwords are never visible to anyone, including admins">Change password</button>
         <button class="btn btn-out" id="logoutBtn">Log out</button>
       </div>
     </header>
@@ -2298,7 +2298,7 @@ function viewDashboard(){
        <div class="asg-b"><div class="asg-site">${esc(j.title||"")}</div>${j.projectName?`<div class="asg-addr">${esc(j.projectName)}</div>`:""}
         <div class="asg-meta">${j.date?`<span class="asg-p">📅 ${esc(j.date)}</span>`:""}${j.assignedTo?`<span class="asg-p">👷 ${esc(j.assignedTo)}</span>`:""}</div></div>
        ${can("joborders.view")?`<div class="asg-act"><a class="alt" href="#" onclick="go('joborders');return false">View job order</a></div>`:""}</div>`).join("")}</div>`:"";
-  V().innerHTML=`${asgBanner}${joBanner}${rejBanner}${rejLiqBanner}${_dept==="crew"?"":`<div class="notice">Prototype build. Data persists per browser; use <b>Export CSV</b> on any module to push data into Google Sheets (live sync and secure server auth are production features). Each user logs in separately and sees only what their role allows.</div>`}
+  V().innerHTML=`${asgBanner}${joBanner}${rejBanner}${rejLiqBanner}
   ${can("payroll.view")?pregDashboardView("viewDashboard"):""}
   <div class="dx-wrap">
     <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">${_dept?`<span class="dept-badge">${DEPT_LABEL[_dept]||""}</span>`:""}<div class="dx-live"><span class="d"></span>${_dept==="crew"?`Live · updated ${new Date().toLocaleTimeString()}`:sub}</div>${_dept==="crew"?"":`<div style="margin-left:auto">${seg}</div>`}</div>
