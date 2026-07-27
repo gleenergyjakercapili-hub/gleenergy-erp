@@ -968,17 +968,11 @@
 
 <script>
 "use strict";
-/* Build request headers, adding the API key when the server injected one
-   (set only when GLEENERGY_API_KEY is configured on the backend). Defined
-   outside the connector guard so the email/SMS calls below can use it too. */
+/* Build request headers. Sign-in security rides on the HttpOnly session cookie,
+   which the browser attaches automatically — the page never holds any secret,
+   and no key or password is ever written into this file. */
 window.gleenergyHeaders=function(){
-  const h={"Content-Type":"application/json"};
-  /* ⚠ "X-API-Key" below is the HEADER NAME — it must stay exactly this text.
-     NEVER paste the actual key value anywhere in this file. The secret key
-     lives ONLY in Render → gleenergy-erp → Environment → GLEENERGY_API_KEY.
-     Nothing in the code changes when that key is created or regenerated. */
-  if(window.GLEENERGY_API_KEY) h["J5OmLkhVOjr/+4qCBeeUioS6nso12tmnAPiTd0Jqaxo="]=window.GLEENERGY_API_KEY;
-  return h;
+  return {"Content-Type":"application/json"};
 };
 if(typeof window.storage==="undefined"){
   /* ===== Python backend connector ===== */
