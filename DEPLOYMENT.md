@@ -91,11 +91,11 @@ daily; additionally download an in-app Full Backup monthly as an offline copy.
   401\. Failed sign-ins are rate-limited (8 per account, 30 per IP, per
   10 minutes). Sessions live in a `sessions` table (only the SHA-256 of the
   token is stored) and are revoked on logout.
-- `GLEENERGY_API_KEY` is now **only** for server-to-server scripts and
-  backups (`X-API-Key` header). It is no longer injected into the served
-  page. Because older builds did publish it in the page, **regenerate the
-  key once in Render** (service → Environment → `GLEENERGY_API_KEY` →
-  generate a new value) after this version deploys.
+- `GLEENERGY_API_KEY` grants **no access at all** — the old `X-API-Key`
+  bypass was removed entirely after the key value repeatedly leaked into
+  the served page. The variable's only remaining effect is switching CORS
+  into locked-down mode, so leave it set but otherwise ignore it. Any
+  server-to-server job signs in through `/api/auth/login` like a person.
 - Remaining honest limitation: any signed-in employee's browser talks to a
   shared key-value store, so per-module permissions are still enforced by
   the app UI, not per-key by the server. Server-side per-key authorization

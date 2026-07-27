@@ -31,10 +31,11 @@ The session rows live in a `sessions` table next to the kv table (each backend
 supplies its own accessors via install_shared(app, auth_db=...)). Only the
 SHA-256 of the token is stored, so the database alone can't forge a cookie.
 
-GLEENERGY_API_KEY is now ONLY for server-to-server scripts and backups: an
-X-API-Key header equal to it also passes the guard. It is NO LONGER injected
-into the served page — browsers authenticate with their session cookie.
-Cross-origin access stays off unless GLEENERGY_CORS_ORIGINS lists origins.
+Sessions are the ONLY credential. The old X-API-Key bypass was removed after
+the key value repeatedly leaked into the served page — server-to-server jobs
+sign in through /api/auth/login like a person. GLEENERGY_API_KEY now only
+switches CORS into locked-down mode; its value grants no access. Cross-origin
+access stays off unless GLEENERGY_CORS_ORIGINS lists origins.
 """
 
 import os
@@ -185,8 +186,10 @@ def _session_from_request(request, auth_db):
     return entry
 
 
-def _api_key_matches(request):
-    return bool(API_KEY) and hmac.compare_digest(request.headers.get("x-api-key", ""), API_KEY)
+# NOTE: X-API-Key access was deliberately removed (2026-07-27). The key value
+# leaked into the served page repeatedly and could not be rotated reliably, so
+# sessions are the only credential. GLEENERGY_API_KEY now only switches CORS
+# into locked-down mode; its value grants nothing.
 
 
 # ----------------------------------------------------------------------
@@ -504,9 +507,9 @@ def install_shared(app, auth_db=None):
             allow_methods=["*"],
             allow_headers=["*"],
         )
-        print("[gleenergy] NOTE: GLEENERGY_API_KEY is not set. Sign-in sessions still "
-              "guard the /api endpoints; the key only adds script/backup access and "
-              "locked-down CORS, so set it for internet-facing deployments.")
+        print("[gleenergy] NOTE: GLEENERGY_API_KEY is not set. Sign-in sessions guard "
+              "the /api endpoints either way; the variable only switches CORS into "
+              "locked-down mode for internet-facing deployments.")
 
     # --- Session guard for /api/* ------------------------------------------
     @app.middleware("http")
@@ -516,7 +519,7 @@ def install_shared(app, auth_db=None):
             if path.startswith("/api/"):
                 # Cross-site POSTs are refused outright (SameSite=Lax already
                 # keeps the cookie home; this also covers older browsers).
-                if request.method == "POST" and not _api_key_matches(request):
+                if request.method == "POST":
                     origin = request.headers.get("origin", "")
                     if origin:
                         onet = urllib.parse.urlsplit(origin).netloc.lower()
@@ -527,8 +530,12 @@ def install_shared(app, auth_db=None):
                                 status_code=403,
                             )
                 if path not in _OPEN_API_PATHS:
-                    authed = _api_key_matches(request)
-                    if not authed and auth_db is not None:
+                    # Sign-in sessions are the ONLY way in. The X-API-Key bypass
+                    # was removed after the key value leaked into the served page
+                    # repeatedly — a key nobody can rotate reliably is not a
+                    # credential. Server-to-server jobs sign in like a person.
+                    authed = False
+                    if auth_db is not None:
                         try:
                             sess = await run_in_threadpool(_session_from_request, request, auth_db)
                         except Exception as exc:                       # DB hiccup ≠ "not signed in"
@@ -649,7 +656,7 @@ def install_shared(app, auth_db=None):
 
     @app.get("/api/health")
     def health():
-        return {"ok": True, "protected": bool(API_KEY)}
+        return {"ok": True, "protected": True}   # sessions always guard the API
 
     @app.get("/")
     def index():
