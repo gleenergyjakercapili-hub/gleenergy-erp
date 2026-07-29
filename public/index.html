@@ -44,6 +44,9 @@
      Language   button labels are precise action verbs ("Delete",
                 "Save anyway", "Cancel claim") — never bare Yes/No/OK;
                 uiConfirm() infers the verb from the message
+     Selection  a chosen item fills with brand color — the whole row
+                pops, not just its checkbox — so the result of every
+                action is unmissable at a glance
      ============================================================ */
   :root{
     /* brand */
@@ -456,7 +459,16 @@
   .crewpick .cp-r input[type=checkbox]{accent-color:var(--brand);cursor:pointer;flex:0 0 15px;margin:0;
     width:15px;height:15px;min-width:15px;padding:0;border:0;border-radius:0;background:none;appearance:auto;-webkit-appearance:checkbox}
   .crewpick .cp-nm{flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:#3f3a4d}
-  .crewpick .cp-r:has(input:checked) .cp-nm{font-weight:700;color:var(--brand)}
+  /* Selection pops: a chosen person fills the WHOLE row with brand color —
+     the result of the tap is unmissable, not just a 15px checkbox tick. */
+  .crewpick .cp-r{transition:background .12s;border-radius:6px}
+  .crewpick .cp-r:has(input:checked){background:linear-gradient(150deg,var(--brand),var(--brand-2));border-bottom-color:transparent}
+  .crewpick .cp-r:has(input:checked) .cp-nm{font-weight:700;color:#fff}
+  .crewpick .cp-r:has(input:checked) .cp-nm span{color:rgba(255,255,255,.78) !important}
+  .crewpick .cp-r:has(input:checked) input[type=checkbox]{accent-color:#fff}
+  /* same principle on selectable table rows + the permissions matrix */
+  tr:has(.pregrow-cb:checked) td{background:#f1e9fc}
+  .rbac td.cell:has(input:checked){background:#efe7fb}
   .crewpick .cp-busy{flex:0 0 auto;font-size:9.5px;font-weight:800;color:#a13b3b;background:#fdeaea;border-radius:20px;padding:1px 6px}
   .crewpick .cp-empty{font-size:11px;color:var(--muted);padding:10px}
   /* Fixed height + nowrap: the footer must never grow, or one column ends up taller
