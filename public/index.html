@@ -53,6 +53,9 @@
      Readability text weight never drops below regular (400) — the
                 loaded font files start at 400 by design — and no text
                 sits under ~65% opacity; subtle must still be legible
+     Information over-inform rather than omit: show sizes, dates,
+                counts and live progress ("Loading — 64%"), never a
+                bare spinner or an unexplained wait
      ============================================================ */
   :root{
     /* brand */
@@ -87,6 +90,7 @@
   .boot-dots span:nth-child(2){animation-delay:.15s}
   .boot-dots span:nth-child(3){animation-delay:.3s}
   @keyframes bootDot{0%,100%{transform:translateY(0);opacity:.45}50%{transform:translateY(-6px);opacity:1}}
+  .boot-msg{color:rgba(255,255,255,.8);font-size:12.5px;font-weight:600;font-family:var(--font);min-height:16px}
 
   #login{min-height:100vh;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;
     background:radial-gradient(900px 500px at 80% -10%,rgba(84,48,158,.35),transparent 60%),
@@ -1011,6 +1015,7 @@
 <div id="bootSplash">
   <div class="brand-logo" style="width:250px;height:54px;background-color:#fff;border-radius:8px;padding:5px 10px;box-sizing:border-box"></div>
   <div class="boot-dots"><span></span><span></span><span></span></div>
+  <div class="boot-msg" id="bsMsg">Connecting…</div>
 </div>
 <script>
 /* Standalone safety net: if the main script ever fails to run, the splash must
@@ -1406,7 +1411,7 @@ async function rawSet(key,strVal){
   }
   return false;
 }
-async function loadKey(key,fb){try{const r=await window.storage.get(key,true);return(r&&r.value)?JSON.parse(r.value):fb;}catch(e){return fb;}}
+async function loadKey(key,fb){try{const r=await window.storage.get(key,true);if(window._initTick)window._initTick();return(r&&r.value)?JSON.parse(r.value):fb;}catch(e){if(window._initTick)window._initTick();return fb;}}
 async function saveKey(key,val){const ok=await rawSet(key,JSON.stringify(val));if(!ok)markDegraded();}
 
 /* ============ state ============ */
@@ -1448,7 +1453,12 @@ async function init(){
      must abort the whole load instead. A missing key (null, fresh install) is
      fine and does not throw. */
   await window.storage.get(K.rbac,true);
-  DB.rbac=await loadKey(K.rbac,null)||(await saveKey(K.rbac,defaultRbac()),defaultRbac());
+  /* Over-inform: while the workspace loads, show live progress on the boot
+     splash and the login card instead of a bare "Loading…". */
+  {let _n=0;const _total=Object.keys(K).length+8;
+   window._initTick=()=>{_n++;const pct=Math.min(99,Math.round(_n/_total*100));
+     const b=document.getElementById("bsMsg");if(b)b.textContent="Loading your workspace — "+pct+"%";
+     const le=document.getElementById("liErr");if(le&&le.textContent.indexOf("Loading")===0)le.textContent="Loading your workspace — "+pct+"%";};}
   DB.employees=await loadKey(K.emp,null)||(await saveKey(K.emp,seedEmployees()),seedEmployees());
   DB.clients=await loadKey(K.cli,null)||(await saveKey(K.cli,seedClients()),seedClients());
   DB.sequences=await loadKey(K.seq,null)||(await saveKey(K.seq,seedSequences()),seedSequences());
@@ -1545,6 +1555,7 @@ async function init(){
       await saveKey(K.enr,DB.enrollments);}
     await saveKey("p2:demoseeded","1");
   }
+  window._initTick=null;   /* loading finished — stop reporting progress */
 }
 
 /* ============ login & session ============ */
