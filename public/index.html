@@ -41,6 +41,9 @@
                 data outranks labels, primary outranks meta
      Similarity related things look the same everywhere (icons, pills,
                 chips, tables share one style) to lower cognitive load
+     Language   button labels are precise action verbs ("Delete",
+                "Save anyway", "Cancel claim") — never bare Yes/No/OK;
+                uiConfirm() infers the verb from the message
      ============================================================ */
   :root{
     /* brand */
@@ -4618,7 +4621,7 @@ async function prepBomFromSurvey(id){
   const pr=DB.projects.find(x=>x.id===id);if(!pr||!can("projects.edit")||pr.deducted)return;
   const info=projSurvey(pr),s=info.completed||info.survey;
   if(!s){alert("No site survey report found for "+(pr.clientName||"this client")+". Create it in the Site Survey module and mark it Completed first.");return;}
-  if(s.status!=="Completed"&&!await uiConfirm("This client's site survey is still a Draft. Build the BOM from the draft survey anyway?"))return;
+  if(s.status!=="Completed"&&!await uiConfirm("This client's site survey is still a Draft. Build the BOM from the draft survey anyway?",{okLabel:"Build anyway",cancelLabel:"Go back"}))return;
   const materials=bomFromSurvey(s,DB.clients.find(c=>c.id===pr.clientId)||null);
   if(!materials.length){alert("The survey has no system sizing yet (kWp / panels / inverter). Fill those in the survey report first.");return;}
   if((pr.materials||[]).length&&!await uiConfirm("Replace the current BOM with materials generated from the survey report ("+(s.refNo||s.date||"")+")?"))return;
@@ -5177,7 +5180,7 @@ function siteSchedForm(id,preset){
      if(veh&&codingClash(veh,date))clashes.push(`• ${assetName(veh)} is number-coded on ${dateWeekday(date)}`);
      const teamId=gv("f_steam"),tm=teamById(teamId);
      if(teamId){const tc=teamConflicts(teamId,date,time,dur,id);if(tc.length)clashes.push(`• Team ${tm?tm.name:""} is already deployed — ${tc.map(x=>(x.time||"—")+" "+(x.projectName||x.site||"deployment")).join("; ")}`);}
-     if(clashes.length&&!await uiConfirm("Scheduling warning\n\n"+clashes.join("\n")+"\n\nSave this deployment anyway?"))return;
+     if(clashes.length&&!await uiConfirm("Scheduling warning\n\n"+clashes.join("\n")+"\n\nSave this deployment anyway?",{okLabel:"Save anyway",cancelLabel:"Go back",title:"Scheduling warning"}))return;
      const d={kind:"site",type:"Installation",projectId:gv("f_sproj"),projectName:proj?proj.name:"",pm:gv("f_spm"),date,time,durationHrs:dur,site:gv("f_ssite").trim(),location:"",sites:"",driver:drv,vehicleId:veh,vehicle:veh?assetName(veh):(vSel==="__legacy__"?(e.vehicle||""):""),droneId:"",teamId,teamName:tm?tm.name:"",leadman:lead,skills:crewChecked("ck-skill"),labors:crewChecked("ck-labor"),labor:"",pinUrl:gv("f_smap"),notes:gv("f_snotes"),title:(gv("f_ssite")||(proj?proj.name:"Site"))+" — deployment",assignedTo:gv("f_spm")};
      if(id){Object.assign(e,d);await logAudit("update","schedule",d.site||"site","Edited site deployment");}else{DB.schedule.push({id:uid(),...d});await logAudit("create","schedule",d.site||"site","Scheduled site deployment");}
      await saveKey(K.sch,DB.schedule);
@@ -5291,7 +5294,7 @@ function surveySchedForm(id){
        if(c.length)clashes.push(`• ${assetName(aid)} — ${c.map(x=>(x.time||"—")+" "+(x.kind==="survey"?(x.clientName||"survey"):(x.projectName||x.site||"deployment"))).join("; ")}`);});
      if(lead){const pc=personConflicts(lead,date,time,dur,id);
        if(pc.length)clashes.push(`• ${lead} — ${pc.map(x=>(x.time||"—")+" "+(x.kind==="survey"?(x.clientName||"survey"):(x.projectName||x.site||"deployment"))).join("; ")}`);}
-     if(clashes.length&&!await uiConfirm("Double-booking warning\n\n"+clashes.join("\n")+"\n\nSave this schedule anyway?"))return;
+     if(clashes.length&&!await uiConfirm("Double-booking warning\n\n"+clashes.join("\n")+"\n\nSave this schedule anyway?",{okLabel:"Save anyway",cancelLabel:"Go back",title:"Double-booking warning"}))return;
      const d={kind:"survey",type:"Site Visit",clientName:gv("f_vclient"),sales:gv("f_vsales"),leadman:lead,date,time,durationHrs:dur,location:gv("f_vloc"),pinUrl:gv("f_vmap"),vehicleId:veh,droneId:drn,status:gv("f_vstat"),decisionNote:gv("f_vnote"),title:(gv("f_vclient")||"Client")+" — survey",assignedTo:gv("f_vsales"),projectName:""};
      if(id){Object.assign(e,d);await logAudit("update","schedule",d.clientName||"survey","Edited survey schedule");}else{DB.schedule.push({id:uid(),...d});await logAudit("create","schedule",d.clientName||"survey","Scheduled survey");}
      await saveKey(K.sch,DB.schedule);closeModal();viewSchedule();}]]);
@@ -6379,7 +6382,7 @@ async function rejectClaim(id){
 async function cancelClaim(id){
   const c=DB.claims.find(x=>x.id===id);if(!c)return;
   if(c.requestedById!==user.id||c.status!=="Pending"){alert("You can only cancel your own pending claims.");return;}
-  if(!await uiConfirm("Cancel this pending claim?"))return;
+  if(!await uiConfirm("Cancel this pending claim? It will be withdrawn and can no longer be approved.",{okLabel:"Cancel claim",cancelLabel:"Keep claim",title:"Cancel claim",danger:true}))return;
   if(c.hasReceipt){try{await window.storage.delete("p2:claimrcpt:"+id,true);}catch(e){}}
   DB.claims=DB.claims.filter(x=>x.id!==id);await saveKey(K.claims,DB.claims);
   await logAudit("delete","claim",c.type,"Cancelled by requester");buildNav();viewClaims();
@@ -9658,9 +9661,15 @@ function uiConfirm(message,opts){
     const isDel=/\bdelete\b/i.test(message), isRej=/\breject\b/i.test(message);
     const danger=opts.danger!==undefined?opts.danger:(isDel||isRej||/remove|discard|permanently|clear/i.test(message));
     const title=opts.title||(danger?"Please confirm":"Confirm");
-    const okLabel=opts.okLabel||(isDel?"Delete":isRej?"Reject":"Confirm");
+    /* Clear language: the OK button names the ACTION itself, never a bare
+       Yes/OK. When the caller doesn't pass okLabel, borrow the imperative
+       verb the message opens with. ("Cancel" is deliberately excluded —
+       an OK button reading Cancel would fight the real Cancel button.) */
+    const _lead=(String(message).trim().match(/^(Archive|Remove|Stop|Replace|Restore|Reactivate|Clear|Post|Approve|Send|Save|Build|Mark)\b/)||[])[1];
+    const okLabel=opts.okLabel||(isDel?"Delete":isRej?"Reject":_lead||"Confirm");
+    const cancelLabel=opts.cancelLabel||"Cancel";
     const ov=document.createElement("div");ov.className="ui-dialog-overlay";
-    ov.innerHTML=`<div class="ui-dialog" role="alertdialog"><div class="ui-dialog-head"><span class="ui-dialog-ico ${danger?"danger":"warn"}">${danger?(isDel?ICON_TRASH:ICON_WARN):ICON_WARN}</span><h3>${esc(title)}</h3></div><div class="ui-dialog-body">${esc(message)}</div><div class="ui-dialog-foot"><button class="btn btn-out" data-cancel>Cancel</button><button class="btn ${danger?"btn-danger":"btn-primary"}" data-ok>${esc(okLabel)}</button></div></div>`;
+    ov.innerHTML=`<div class="ui-dialog" role="alertdialog"><div class="ui-dialog-head"><span class="ui-dialog-ico ${danger?"danger":"warn"}">${danger?(isDel?ICON_TRASH:ICON_WARN):ICON_WARN}</span><h3>${esc(title)}</h3></div><div class="ui-dialog-body">${esc(message)}</div><div class="ui-dialog-foot"><button class="btn btn-out" data-cancel>${esc(cancelLabel)}</button><button class="btn ${danger?"btn-danger":"btn-primary"}" data-ok>${esc(okLabel)}</button></div></div>`;
     document.body.appendChild(ov);
     const done=(v)=>{ov.remove();document.removeEventListener("keydown",onkey);res(v);};
     function onkey(e){if(e.key==="Escape")done(false);else if(e.key==="Enter")done(true);}
