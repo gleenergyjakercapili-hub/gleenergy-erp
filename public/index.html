@@ -50,6 +50,9 @@
      Touch      interactive zones extend past the visible control to a
                 ~44px hit area on touch devices (invisible ::after
                 overlay) — small icons never mean small targets
+     Readability text weight never drops below regular (400) — the
+                loaded font files start at 400 by design — and no text
+                sits under ~65% opacity; subtle must still be legible
      ============================================================ */
   :root{
     /* brand */
@@ -146,7 +149,7 @@
   /* --- grouped navigation: labeled, collapsible sections --- */
   .nav .grp{display:flex;flex-direction:column;gap:3px}
   .nav .gh{display:flex;align-items:center;gap:7px;background:transparent;border:0;width:100%;cursor:pointer;text-align:left;
-    color:rgba(255,255,255,.48);font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;padding:13px 12px 3px;font-family:inherit}
+    color:rgba(255,255,255,.68);font-size:10px;font-weight:800;letter-spacing:.1em;text-transform:uppercase;padding:13px 12px 3px;font-family:inherit}
   .nav .gh:hover{background:transparent;color:rgba(255,255,255,.85)}
   .nav .gh .chev{margin-left:auto;font-size:9px;opacity:.7;transition:transform .18s}
   .nav .grp.closed .gh .chev{transform:rotate(-90deg)}
@@ -346,7 +349,7 @@
   .segbar button.on{background:linear-gradient(150deg,var(--brand),var(--brand-2));color:#fff;box-shadow:0 4px 12px rgba(80,46,138,.30)}
   .segbar button .n{font-size:10px;font-weight:800;margin-left:7px;background:rgba(80,46,138,.12);color:var(--brand);border-radius:10px;padding:1px 6px;line-height:1.5}
   .segbar button.on .n{background:rgba(255,255,255,.25);color:#fff}
-  .segbar button .n.z{opacity:.45}
+  .segbar button .n.z{opacity:.6}
   /* ===== soft-UI stage filter tabs ===== */
   .cfilter{padding:7px 13px !important;font-size:12.5px;border-radius:10px;display:inline-flex;align-items:center;gap:5px;line-height:1}
   .cfilter .cfn{display:inline-flex;align-items:center;justify-content:center;min-width:19px;height:18px;padding:0 5px;border-radius:9px;background:rgba(80,46,138,.13);color:var(--brand);font-size:11px;font-weight:800}
