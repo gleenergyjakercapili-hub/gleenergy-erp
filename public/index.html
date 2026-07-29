@@ -47,6 +47,9 @@
      Selection  a chosen item fills with brand color — the whole row
                 pops, not just its checkbox — so the result of every
                 action is unmissable at a glance
+     Touch      interactive zones extend past the visible control to a
+                ~44px hit area on touch devices (invisible ::after
+                overlay) — small icons never mean small targets
      ============================================================ */
   :root{
     /* brand */
@@ -983,6 +986,18 @@
   .ssel-opt:last-child{border-bottom:none}
   .ssel-opt:hover{background:#f5f1fc}
   .ssel-opt.sel{background:#f1ecfa;font-weight:600}
+  /* Touch targets: on phones and touch devices every interactive control
+     guarantees a ~44px hit zone. The VISIBLE control keeps its elegant size;
+     an invisible centered overlay extends the tappable area beyond it. */
+  @media (pointer:coarse),(max-width:740px){
+    .pass-toggle,.forgot-link,.icobtn,.rowact-more,.modal-head .x,.segbar button,.mnav>button{position:relative}
+    .pass-toggle::after,.forgot-link::after,.icobtn::after,.rowact-more::after,.modal-head .x::after,.segbar button::after,.mnav>button::after{
+      content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
+      width:max(100%,44px);height:max(100%,44px)}
+    .modal-head .x{width:34px;height:34px}
+    .crewpick .cp-r{height:38px}
+    .notif-btn,.kbtn,.side-toggle{width:42px;height:42px}
+  }
 </style>
 </head>
 <body>
