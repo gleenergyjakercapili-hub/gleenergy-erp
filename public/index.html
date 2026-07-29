@@ -25,7 +25,11 @@
      Palette   deep violet brand + old-gold accent on warm neutrals
      Type      Montserrat (display/headings) + Inter (UI/body/tables)
      Spacing   4px base scale (--sp-1..--sp-6)
-     Radius    10 / 14 / 18  (controls, cards, sheets)
+     Radius    10 / 14 / 18 (controls, cards, sheets). Nested corners
+               follow the 1:2 rule — an inner shape uses about half of
+               its container's radius, never the same value (identical
+               nested radii read as skewed). Full pills (999px) nesting
+               full pills are the geometric exception.
      Elevation 3 layered soft shadows, violet-tinted — never harsh
 
      PRINCIPLES (the charter every screen follows)
@@ -125,7 +129,7 @@
   .nav button.active{background:var(--accent);color:#3a2a00}
   /* one icon language everywhere: outline strokes that inherit currentColor,
      so state (rest / hover / active) is pure CSS and always consistent */
-  .nav .ico{width:26px;height:26px;border-radius:8px;background:rgba(255,255,255,.12);color:rgba(255,255,255,.92);display:flex;align-items:center;justify-content:center;flex:none;transition:background .15s}
+  .nav .ico{width:26px;height:26px;border-radius:5px;background:rgba(255,255,255,.12);color:rgba(255,255,255,.92);display:flex;align-items:center;justify-content:center;flex:none;transition:background .15s}
   .nav .ico svg{width:16px;height:16px}
   .nav button:hover .ico{background:rgba(255,255,255,.2)}
   .nav button.active .ico{background:rgba(42,24,84,.16);color:#2a1854}
@@ -155,7 +159,7 @@
   .notif-badge{position:absolute;top:-6px;right:-6px;min-width:18px;height:18px;background:var(--red);color:#fff;border-radius:9px;font-size:10px;font-weight:800;display:flex;align-items:center;justify-content:center;padding:0 4px;border:2px solid #fff}
   .notif-panel{position:absolute;top:50px;right:0;width:340px;max-height:62vh;overflow:auto;background:#fff;border:1px solid var(--line);border-radius:14px;box-shadow:0 18px 50px rgba(40,20,80,.22);z-index:95;padding:8px}
   .notif-panel h4{margin:6px 8px 8px;font-size:13px;color:var(--brand)}
-  .notif-item{display:flex;gap:10px;padding:9px 10px;border-radius:10px;cursor:pointer;align-items:flex-start}
+  .notif-item{display:flex;gap:10px;padding:9px 10px;border-radius:7px;cursor:pointer;align-items:flex-start}
   .notif-item:hover{background:#f5f1fc}
   .notif-item.notif-new{background:#f4eefe}
   @keyframes focusFlash{0%,18%{background:#ffe7a6}100%{background:transparent}}
@@ -165,7 +169,7 @@
   @keyframes uiFadeIn{from{opacity:0}to{opacity:1}}
   @keyframes uiPop{from{opacity:0;transform:translateY(10px) scale(.96)}to{opacity:1;transform:none}}
   .ui-dialog-head{display:flex;align-items:center;gap:12px;margin-bottom:10px}
-  .ui-dialog-ico{width:42px;height:42px;border-radius:12px;display:flex;align-items:center;justify-content:center;flex:none;color:#fff}
+  .ui-dialog-ico{width:42px;height:42px;border-radius:9px;display:flex;align-items:center;justify-content:center;flex:none;color:#fff}
   .ui-dialog-ico.info{background:linear-gradient(150deg,#6a45c8,#4a2a86)}
   .ui-dialog-ico.warn{background:linear-gradient(150deg,#f7b733,#e08e0b)}
   .ui-dialog-ico.danger{background:linear-gradient(150deg,#ff6b6b,#d12b2b)}
@@ -217,7 +221,7 @@
   .kpi{position:relative;display:flex;align-items:center;gap:14px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:15px 18px 15px 20px;overflow:hidden;box-shadow:0 6px 16px rgba(70,45,120,.06);transition:box-shadow .2s ease,transform .2s ease}
   .kpi:hover{box-shadow:0 12px 24px rgba(70,45,120,.11);transform:translateY(-2px)}
   .kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:var(--kc,var(--brand))}
-  .kpi .k-ic{flex:0 0 auto;width:46px;height:46px;border-radius:12px;display:flex;align-items:center;justify-content:center;color:var(--kc,var(--brand));background:var(--kt,#efeafa)}
+  .kpi .k-ic{flex:0 0 auto;width:46px;height:46px;border-radius:7px;display:flex;align-items:center;justify-content:center;color:var(--kc,var(--brand));background:var(--kt,#efeafa)}
   .kpi .k-ic svg{width:23px;height:23px}
   .kpi .k-body{min-width:0}
   .kpi .l{font-size:11px;color:var(--muted);font-weight:700;letter-spacing:.05em;text-transform:uppercase;line-height:1.25}
@@ -229,7 +233,7 @@
   .panel-head h3{font-family:var(--display);font-size:15px;margin:0}
   .panel-head .tools{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
   .panel-sub{font-size:12px;color:var(--muted);margin-top:3px;max-width:680px;line-height:1.45;font-weight:500}
-  .panel-intro{font-size:12.5px;color:var(--ink);background:#f6f3fd;border:1px solid var(--line);border-radius:11px;padding:11px 15px;margin-bottom:14px;line-height:1.55}
+  .panel-intro{font-size:12.5px;color:var(--ink);background:#f6f3fd;border:1px solid var(--line);border-radius:7px;padding:11px 15px;margin-bottom:14px;line-height:1.55}
   table{width:100%;border-collapse:collapse;font-size:13px}
   th{text-align:left;font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);padding:11px 18px;border-bottom:1px solid var(--line);background:#faf9fd}
   td{padding:11px 18px;border-bottom:1px solid var(--line);vertical-align:middle}
@@ -260,7 +264,7 @@
   .cmdk-l{overflow-y:auto;padding:6px}
   .cmdk-g{font-size:9.5px;font-weight:800;letter-spacing:.09em;text-transform:uppercase;color:var(--muted);padding:9px 12px 4px}
   .cmdk-i{display:flex;align-items:center;gap:11px;padding:9px 12px;border-radius:10px;cursor:pointer}
-  .cmdk-i .ic{width:26px;height:26px;border-radius:8px;background:#f4f0fc;display:flex;align-items:center;justify-content:center;flex:none;font-size:13px}
+  .cmdk-i .ic{width:26px;height:26px;border-radius:5px;background:#f4f0fc;display:flex;align-items:center;justify-content:center;flex:none;font-size:13px}
   .cmdk-i .ic svg{width:16px;height:16px;display:block}
   .cmdk-i .tx{min-width:0;flex:1}
   .cmdk-i .t1{font-size:13.5px;font-weight:700;color:var(--ink);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -879,7 +883,7 @@
   .dx-h .hd.up{color:#1c7a4a;background:#e6f6ee}.dx-h .hd.down{color:#b4232a;background:#fdeaea}
   .dx-h canvas{position:absolute;left:0;right:0;bottom:0;width:100%;height:36px;opacity:.55;z-index:0}
   .dx-h .hl,.dx-h .hv,.dx-h .hd,.dx-h .hg{z-index:2}
-  .dx-h .hg{position:absolute;right:12px;top:14px;width:32px;height:32px;border-radius:9px;background:var(--hc,#f1ebfc);display:flex;align-items:center;justify-content:center;font-size:15px}
+  .dx-h .hg{position:absolute;right:12px;top:14px;width:32px;height:32px;border-radius:8px;background:var(--hc,#f1ebfc);display:flex;align-items:center;justify-content:center;font-size:15px}
   .dx-h .hg svg{width:19px;height:19px;display:block}
   .hA{--hx:#6a45c8;--hc:#f1ebfc}.hB{--hx:#a13bb0;--hc:#f8ecfa}
   .hC{--hx:#1ca9a3;--hc:#e6f7f6}.hD{--hx:#e9536a;--hc:#fdeef0}
