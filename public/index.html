@@ -1140,8 +1140,8 @@ function defaultRbac(){
     "Operations Manager":set("dashboard.view","clients.view","clients.create","clients.edit","proposals.view","projects.view","projects.edit","projects.convert","survey.view","survey.edit","inventory.view","inventory.edit","purchasing.view","purchasing.edit","pr.submit","pr.approve","pr.inventory","schedule.view","schedule.edit","tasks.view","tasks.edit","attendance.view","attendance.edit","employees.view","payroll.view","finance.view","accounting.view","liaison.view","aftersales.view","aftersales.edit","commissions.view","claims.submit","documents.view","documents.edit","audit.view","joborders.view","joborders.edit","sop.view","sop.review"),
     "Sales Manager":set("dashboard.view","clients.view","clients.edit","clients.create","proposals.view","proposals.edit","proposals.create","followups.view","followups.edit","aftersales.view","schedule.view","schedule.edit","attendance.view","documents.view","documents.edit","sop.view"),
     "HR Admin":set("dashboard.view","employees.view","employees.edit","attendance.view","attendance.edit","payroll.view","payroll.edit","documents.view","documents.edit","sop.view"),
-    "Accountant":set("dashboard.view","finance.view","finance.edit","finance.collect","accounting.view","accounting.edit","payroll.view","aftersales.view","documents.view","joborders.view","sop.view"),
-    "Purchaser":set("dashboard.view","purchasing.view","purchasing.edit","inventory.view","inventory.edit","projects.view","documents.view","sop.view"),
+    "Accountant":set("dashboard.view","finance.view","finance.edit","finance.collect","accounting.view","accounting.edit","payroll.view","attendance.view","aftersales.view","documents.view","joborders.view","sop.view"),
+    "Purchaser":set("dashboard.view","purchasing.view","purchasing.edit","inventory.view","inventory.edit","projects.view","attendance.view","documents.view","sop.view"),
     "Lead-Man Electrician":set("dashboard.view","projects.view","inventory.view","schedule.view","tasks.view","tasks.edit","attendance.view","documents.view","joborders.view"),
     "Inventory Keeper":set("dashboard.view","inventory.view","inventory.edit","purchasing.view","purchasing.edit","projects.view","attendance.view","documents.view","sop.view"),
     "Driver":set("dashboard.view","schedule.view","tasks.view","attendance.view","joborders.view"),
@@ -1549,6 +1549,11 @@ async function init(){
      doing it. Create without edit would strand them on their own typos, so both. */
   if(!DB.rbac._omClients){const om=DB.rbac["Operations Manager"];if(om){om["clients.create"]=true;om["clients.edit"]=true;}DB.rbac._omClients=true;await saveKey(K.rbac,DB.rbac);}
   if(!DB.rbac._engSched){const en=DB.rbac["Engineer"];if(en){en["schedule.view"]=true;en["schedule.edit"]=true;}DB.rbac._engSched=true;await saveKey(K.rbac,DB.rbac);}
+  /* Purchaser and Accountant were the only two roles without attendance access —
+     an oversight: they are ordinary employees who clock in like everyone else,
+     and without it their days never reach the payroll register. View only;
+     editing other people's records stays with HR/Ops/PM/Admin. */
+  if(!DB.rbac._attAllStaff){["Purchaser","Accountant"].forEach(r=>{if(DB.rbac[r])DB.rbac[r]["attendance.view"]=true;});DB.rbac._attAllStaff=true;await saveKey(K.rbac,DB.rbac);}
   if(!DB.rbac._opsMgr){if(!DB.rbac["Operations Manager"])DB.rbac["Operations Manager"]=defaultRbac()["Operations Manager"]||{};DB.rbac._opsMgr=true;await saveKey(K.rbac,DB.rbac);}
   if(!DB.rbac._docsAll){Object.keys(DB.rbac).forEach(role=>{if(role[0]==="_")return;if(DB.rbac[role]&&typeof DB.rbac[role]==="object")DB.rbac[role]["documents.view"]=true;});DB.rbac._docsAll=true;await saveKey(K.rbac,DB.rbac);}
   // seed a demo proposal + enrollment once
