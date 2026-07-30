@@ -5653,6 +5653,11 @@ function viewAttendance(){
     if(lp)lp.onclick=()=>printLaborSummary();}
 }
 async function clock(dir){
+  /* Refresh-before-write: attendance is one shared array written by every
+     employee. Reloading it right before mutating shrinks the morning-rush
+     race (two phones clocking in together) from minutes to milliseconds —
+     otherwise the second save silently erases the first record. */
+  DB.attendance=await loadKey(K.att,DB.attendance);
   const today=todayStr(),now=new Date().toTimeString().slice(0,5);
   let a=DB.attendance.find(x=>x.empId===user.id&&x.date===today);
   if(dir==="in"){if(a){alert("Already clocked in today.");return;}
@@ -5688,6 +5693,7 @@ function bioKioskModal(){
     const emp=DB.employees.find(e=>(e.bioId||"").toLowerCase()===code.toLowerCase());
     if(!emp){msg.innerHTML='<span style="color:var(--red);font-weight:700">✗ ID '+esc(code)+' not recognized</span><div style="font-size:12px;color:var(--muted)">Set this Biometric ID on the employee record.</div>';focusBack();return;}
     const today=todayStr(),now=new Date().toTimeString().slice(0,5);
+    DB.attendance=await loadKey(K.att,DB.attendance);   /* refresh-before-write (shared array) */
     let a=DB.attendance.find(x=>x.empId===emp.id&&x.date===today),action="";
     if(!a){a={id:uid(),empId:emp.id,empName:emp.name,date:today,timeIn:now,timeOut:"",ot:0,status:"Present",projectId:"",projectName:"",laborExpenseId:"",src:"biometric"};DB.attendance.unshift(a);action="IN";await logAudit("create","attendance",emp.name,"Biometric time-in "+now);}
     else if(!a.timeOut){a.timeOut=now;action="OUT";await postAttLabor(a);await logAudit("update","attendance",emp.name,"Biometric time-out "+now);}
@@ -5748,6 +5754,7 @@ function bioImportModal(){
   }
   async function commitBio(){
     let created=0,updated=0;
+    DB.attendance=await loadKey(K.att,DB.attendance);   /* refresh-before-write (shared array) */
     for(const r of (parsed.recs||[])){
       let a=DB.attendance.find(x=>x.empId===r.empId&&x.date===r.date);
       if(a){if(r.timeIn&&(!a.timeIn||r.timeIn<a.timeIn))a.timeIn=r.timeIn;if(r.timeOut&&(!a.timeOut||r.timeOut>a.timeOut))a.timeOut=r.timeOut;if(!a.status||a.status==="Absent")a.status="Present";updated++;}
@@ -5771,10 +5778,14 @@ function attForm(id){
    <div class="fg"><label>OT (hrs)</label><input id="f_aot" type="number" step="0.5" value="${a.ot||0}"></div></div>`,
    [["Cancel","btn-out",closeModal],["Save","btn-primary",async()=>{const emp=DB.employees.find(e=>e.id===gv("f_aemp"));const prj=DB.projects.find(p=>p.id===gv("f_aproj"));
      const d={empId:gv("f_aemp"),empName:emp?emp.name:"",date:gv("f_adate"),timeIn:gv("f_ain"),timeOut:gv("f_aout"),ot:+gv("f_aot")||0,status:gv("f_astat"),projectId:gv("f_aproj"),projectName:prj?prj.name:""};
-     let rec;if(id){Object.assign(a,d);rec=a;await logAudit("update","attendance",d.empName,"Edited record");}else{rec={id:uid(),...d,laborExpenseId:""};DB.attendance.unshift(rec);await logAudit("create","attendance",d.empName,"Added record");}
+     DB.attendance=await loadKey(K.att,DB.attendance);   /* refresh-before-write (shared array) */
+     let rec;if(id){let live=DB.attendance.find(x=>x.id===id);if(!live){live=a;DB.attendance.unshift(live);}Object.assign(live,d);rec=live;await logAudit("update","attendance",d.empName,"Edited record");}else{rec={id:uid(),...d,laborExpenseId:""};DB.attendance.unshift(rec);await logAudit("create","attendance",d.empName,"Added record");}
      await postAttLabor(rec);await saveKey(K.att,DB.attendance);closeModal();viewAttendance();}]]);
 }
-async function delAtt(id){const a=DB.attendance.find(x=>x.id===id);if(!a)return;if(!await uiConfirm("Delete this record?"))return;if(a.laborExpenseId){DB.expenses=DB.expenses.filter(e=>e.id!==a.laborExpenseId);await saveKey(K.exp,DB.expenses);}DB.attendance=DB.attendance.filter(x=>x.id!==id);await saveKey(K.att,DB.attendance);await logAudit("delete","attendance",a.empName,"Deleted");viewAttendance();}
+async function delAtt(id){const a=DB.attendance.find(x=>x.id===id);if(!a)return;if(!await uiConfirm("Delete this record?"))return;
+  DB.attendance=await loadKey(K.att,DB.attendance);   /* refresh-before-write (shared array) */
+  if(a.laborExpenseId){DB.expenses=await loadKey(K.exp,DB.expenses);DB.expenses=DB.expenses.filter(e=>e.id!==a.laborExpenseId);await saveKey(K.exp,DB.expenses);}
+  DB.attendance=DB.attendance.filter(x=>x.id!==id);await saveKey(K.att,DB.attendance);await logAudit("delete","attendance",a.empName,"Deleted");viewAttendance();}
 
 /* ===== Attendance → project labor costing ===== */
 function empDailyRate(emp){if(!emp)return 0;if(emp.dailyRate!=null&&emp.dailyRate!=="")return +emp.dailyRate||0;const basic=+emp.basic||roleBasic(emp.role)||0;return Math.round(basic/26);}
@@ -5802,6 +5813,9 @@ function attLaborCost(a){
   return Math.round(reg*hourly+ot);
 }
 async function postAttLabor(a){
+  /* Expenses is also a shared multi-writer array (every clock-in posts labor);
+     same refresh-before-write protection as attendance. */
+  DB.expenses=await loadKey(K.exp,DB.expenses);
   const cost=attLaborCost(a);
   const ex=a.laborExpenseId?DB.expenses.find(e=>e.id===a.laborExpenseId):null;
   if(!cost||!a.projectId){if(ex){DB.expenses=DB.expenses.filter(e=>e.id!==ex.id);a.laborExpenseId="";await saveKey(K.exp,DB.expenses);}return;}
