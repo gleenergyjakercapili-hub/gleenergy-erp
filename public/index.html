@@ -6540,13 +6540,16 @@ function claimForm(){
    <div class="fg"><label>Amount (PHP)</label><input id="f_camt" type="number" min="0" value="0"></div></div>
    <div class="fg"><label>Description / purpose</label><input id="f_cdesc" placeholder="e.g. Tricycle fare for site visit — Quintia residence"></div>
    <div class="fg"><label>Reference / O.R. no. (optional)</label><input id="f_cref" placeholder="receipt or reference number"></div>
-   <div class="fg"><label>Photo of receipt (proof of original O.R.)</label><input id="f_creceipt" type="file" accept="image/*"><div style="font-size:11px;color:var(--muted);margin-top:3px">Attach a clear photo of the actual receipt. It's stored with this request for Finance to verify.</div></div>
+   <div class="fg"><label>Photo of receipt (proof of original O.R.) <span style="color:var(--red)">*</span></label><input id="f_creceipt" type="file" accept="image/*"><div style="font-size:11px;color:var(--muted);margin-top:3px">Required — attach a clear photo of the actual receipt. It is filed to Documents → ${RECEIPT_CAT} for Accounting and kept as the company's proof.</div></div>
    <div style="font-size:11px;color:var(--muted);margin-top:2px">This will be sent to Finance for approval. It is only posted to the books once Finance approves.</div>`,
    [["Cancel","btn-out",closeModal],["Submit to Finance","btn-primary",async()=>{
      const amount=+gv("f_camt")||0;if(amount<=0){alert("Enter an amount greater than zero.");return;}
      const desc=gv("f_cdesc").trim();if(!desc){alert("Please describe what this is for.");return;}
-     let receiptData="";const _fi=document.getElementById("f_creceipt");
-     if(_fi&&_fi.files&&_fi.files[0]){receiptData=await svCompressP(_fi.files[0]);}
+     /* Proof is mandatory: no receipt photo, no submission. */
+     const _fi=document.getElementById("f_creceipt");
+     if(!(_fi&&_fi.files&&_fi.files[0])){alert("A photo of the receipt is required before submitting.\n\nTake a clear picture of the original O.R. and attach it.");return;}
+     const receiptData=await svCompressP(_fi.files[0]);
+     if(!receiptData){alert("That image could not be read. Please attach a different photo of the receipt.");return;}
      const c={id:uid(),type:gv("f_ctype"),date:gv("f_cdate"),category:gv("f_ccat"),amount,desc,ref:gv("f_cref").trim(),
        requestedBy:user.name,requestedById:user.id,role:user.role,status:"Pending",decidedBy:"",decidedAt:"",expenseId:"",hasReceipt:!!receiptData,receiptDocId:""};
      /* The proof photo is filed into Documents → Receipts so Accounting keeps a
@@ -6700,12 +6703,12 @@ function _liqRowCard(r,i){
       <div class="fg"><label>Category</label><select data-f="category">${cats.map(c=>`<option ${r.category===c?"selected":""}>${esc(c)}</option>`).join("")}</select></div></div>
     <div class="fg"><label>Description / particulars</label><input data-f="desc" value="${esc(r.desc||"")}" placeholder="What was bought / paid for"></div>
     <div class="fg"><label>Amount (PHP)</label><input type="number" data-f="amount" min="0" step="0.01" value="${r.amount||0}" style="text-align:right"></div>
-    <div class="fg" style="margin-bottom:0"><label>Photo of this receipt (proof of the original O.R.)</label>
+    <div class="fg" style="margin-bottom:0"><label>Photo of this receipt (proof of the original O.R.) <span style="color:var(--red)">*</span></label>
       ${r._photo
         ? `<div style="display:flex;align-items:center;gap:10px"><img src="${r._photo}" alt="Receipt preview" style="width:74px;height:74px;object-fit:cover;border-radius:7px;border:1px solid var(--line)"><div><div style="font-size:12px;font-weight:700;color:#1b8f50">✓ Photo attached</div><button type="button" class="icobtn del" data-rmphoto="${i}" style="margin-top:4px">Remove photo</button></div></div>`
         : (r.docId
           ? `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font-size:12px;font-weight:700;color:#1b8f50">✓ Receipt on file in Documents</span><input type="file" accept="image/*" data-photo="${i}" style="max-width:210px"><span style="font-size:11px;color:var(--muted)">choose a file to replace it</span></div>`
-          : `<input type="file" accept="image/*" data-photo="${i}"><div style="font-size:11px;color:var(--muted);margin-top:3px">Attach the actual O.R. photo — it is filed to Documents → ${RECEIPT_CAT} for Accounting.</div>`)}
+          : `<input type="file" accept="image/*" data-photo="${i}"><div style="font-size:11px;color:var(--muted);margin-top:3px">Required — attach the actual O.R. photo. It is filed to Documents → ${RECEIPT_CAT} for Accounting.</div>`)}
     </div>
   </div>`;
 }
@@ -6771,6 +6774,11 @@ function liqForm(id){
       const cust=gv("f_lcust").trim();if(!cust){alert("Enter the custodian name.");return;}
       const valid=_liqRows.filter(r=>(+r.amount||0)>0);
       if(!valid.length){alert("Add at least one expense item with an amount.");return;}
+      /* Proof is mandatory per line — each item is a separate O.R. Name the
+         exact items that are missing one so the custodian knows what to fix. */
+      const missing=[];
+      _liqRows.forEach((r,i)=>{if((+r.amount||0)>0&&!r._photo&&!r.docId)missing.push(`Item ${i+1}${r.orNo?" ("+r.orNo+")":""}${r.supplier?" — "+r.supplier:""}`);});
+      if(missing.length){alert("A receipt photo is required for every expense item.\n\nStill missing:\n• "+missing.join("\n• "));return;}
       const fund=+gv("f_lfund")||0;
       const cc=gv("f_lcash");
       /* File each newly attached O.R. photo into Documents → Receipts, keeping
