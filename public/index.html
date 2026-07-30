@@ -7043,7 +7043,12 @@ function pregAttCandidates(from,to){
     const key=((a.empName||"").trim().toLowerCase())+"|"+a.date;
     if(have.has(key)){out.already.push(a);return;}
     if(NOWORK.includes(a.status)){out.nonWork.push(a);return;}
-    if(!a.timeIn||!a.timeOut){out.noOut.push(a);return;}
+    /* "00:00" is what an un-set time-out field saves as. Treating it literally
+       would read as midnight the NEXT day (pregHrs rolls b<a over 24h) and
+       import a 17-hour day. A punch that ends at exactly midnight is not a
+       real shift here — treat it as not clocked out. */
+    const tout=pregTo24(a.timeOut);
+    if(!a.timeIn||!tout||tout==="00:00"){out.noOut.push(a);return;}
     out.ready.push(a);
   });
   return out;
