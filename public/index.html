@@ -4525,6 +4525,31 @@ function bomGroups(pr){
   ((pr&&pr.materials)||[]).forEach((m,idx)=>{const it=DB.inventory.find(i=>i.id===m.itemId);const sec=bomSectionOf(m,it);(out[sec]=out[sec]||[]).push({idx,m,it});});
   return out;
 }
+/* Material pick list — the printable staging sheet for the warehouse (the SOP
+   chart's final step: "Warehouse personnel will prepare all the materials").
+   Checkbox per line, quantity to pull, live stock on hand, and sign-offs. */
+function printPickList(id){
+  const pr=DB.projects.find(x=>x.id===id);if(!pr)return;
+  const groups=bomGroups(pr);
+  let n=0,rows="";
+  BOM_SECTIONS.forEach(s=>{
+    const g=groups[s.k]||[];if(!g.length)return;
+    rows+=`<tr><td colspan="6" style="background:#f0edf7;font-weight:700;padding:5px 6px">${esc(s.t)}</td></tr>`;
+    g.forEach(r=>{n++;const stock=r.it?(+r.it.qty||0):null;const short=stock!=null&&stock<(+r.m.qty||0);
+      rows+=`<tr><td style="text-align:center;font-size:13px">☐</td><td style="text-align:center">${n}</td><td>${esc(bomDesc(r.m,r.it))}</td><td style="text-align:right"><b>${r.m.qty!=null?r.m.qty:""}</b> ${esc(bomUnit(r.m,r.it))}</td><td style="text-align:right">${stock!=null?stock:"—"}${short?' <b style="color:#b4232a">SHORT</b>':''}</td><td></td></tr>`;});
+  });
+  printDoc("Material Pick List",`<div class="page"><div class="page-inner">${printHeader("MATERIAL PICK LIST")}
+   <div class="kv"><div class="r"><span>Project</span><span>:</span><span class="v brand">${esc(pr.clientName||pr.name||"")}</span></div>
+   <div class="r"><span>Site</span><span>:</span><span class="v">${esc(pr.siteName||pr.name||"")}</span></div>
+   <div class="r"><span>Date prepared</span><span>:</span><span class="v">${esc(todayStr())}</span></div>
+   <div class="r"><span>Prepared by</span><span>:</span><span class="v">${esc((user&&user.name)||"")}</span></div></div>
+   <table class="pi-tbl" style="margin-top:12px"><colgroup><col style="width:6%"><col style="width:6%"><col style="width:44%"><col style="width:16%"><col style="width:14%"><col style="width:14%"></colgroup>
+   <thead><tr><th style="text-align:center">✓</th><th style="text-align:center">#</th><th>Description</th><th style="text-align:right">Qty to pull</th><th style="text-align:right">Stock on hand</th><th>Remarks</th></tr></thead>
+   <tbody>${rows||'<tr><td colspan="6" style="text-align:center;color:#888;padding:16px">No BOM lines on this project yet.</td></tr>'}</tbody></table>
+   <div style="margin-top:8px;font-size:10px;color:#666">Stock on hand is as of printing. Lines marked SHORT need purchasing before staging. Log the release in Inventory → In/Out when the materials leave the warehouse.</div>
+   <div style="margin-top:40px;display:flex;gap:28px"><div style="flex:1;border-top:1px solid #333;padding-top:5px;font-size:11px;text-align:center">Prepared by (Warehouse)</div><div style="flex:1;border-top:1px solid #333;padding-top:5px;font-size:11px;text-align:center">Checked by</div><div style="flex:1;border-top:1px solid #333;padding-top:5px;font-size:11px;text-align:center">Received by (Crew Lead)</div></div>
+   <div style="margin-top:auto;font-size:10px;color:#888;padding:5mm 0 2mm">Generated ${new Date().toLocaleString()}</div></div></div>`);
+}
 function renderBOM(pr){
   const canEdit=can("projects.edit")&&!pr.deducted;const mk=bomMarkup(pr);
   const groups=bomGroups(pr);const cols=canEdit?8:7;
@@ -4595,6 +4620,7 @@ function wireBOM(id){
     await saveKey(K.proj,DB.projects);openProject(id);});
   V().querySelectorAll("[data-bomedit]").forEach(b=>b.onclick=()=>bomLineForm(id,+b.dataset.bomedit));
   V().querySelectorAll("[data-bomdel]").forEach(b=>b.onclick=async()=>{if(!await uiConfirm("Remove this BOM line?"))return;pr.materials.splice(+b.dataset.bomdel,1);await saveKey(K.proj,DB.projects);openProject(id);});
+  {const _pk=document.getElementById("prPickBtn");if(_pk)_pk.onclick=()=>printPickList(id);}
 }
 
 /* ============ MANPOWER & ADDED-EXPENSE SHEET ============ */
@@ -4791,6 +4817,7 @@ function openProject(id){
       <div style="display:flex;align-items:center;gap:6px"><label style="font-size:11px;font-weight:700;color:var(--muted)">Markup %</label><input id="prMk" type="number" min="0" step="1" value="${bomMarkup(pr)}" style="width:74px;padding:6px;border:1px solid var(--line);border-radius:6px" ${can("projects.edit")?"":"disabled"}></div>
       <div>Materials (raw): <b>${peso(bomRawTotal(pr))}</b></div>
       <div>BOM total (incl. ${bomMarkup(pr)}%): <b style="color:var(--brand)">${peso(bomGrand(pr))}</b></div>
+      <button class="btn btn-light" id="prPickBtn" title="Printable staging sheet for the warehouse — checkboxes, quantities and stock on hand">Print pick list</button>
     </div>
     ${renderBOM(pr)}
     ${(can("projects.edit")&&!pr.deducted)?'<div style="margin-top:10px;display:flex;gap:10px;flex-wrap:wrap"><button class="btn btn-primary" id="prAddBom">+ Add BOM line</button><button class="btn btn-light" id="prBomFromSurvey">↻ Prepare BOM from survey</button><button class="btn btn-light" id="prToPurch">Send to Purchasing →</button></div>':''}
