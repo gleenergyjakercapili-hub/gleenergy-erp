@@ -6471,9 +6471,9 @@ function viewClaims(){
    ${list.length?`<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Type</th>${canAppr?"<th>Requested by</th>":""}<th>Category</th><th>Description</th><th style="text-align:right">Amount</th><th>Status</th><th></th></tr></thead><tbody>
    ${list.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(c=>`<tr>
      <td>${esc(c.date)}</td><td>${esc(c.type)}</td>${canAppr?`<td>${esc(c.requestedBy)}<div style="font-size:10px;color:var(--muted)">${esc(c.role||"")}</div></td>`:""}
-     <td>${esc(c.category)}</td><td>${esc(c.desc||"")}</td><td style="text-align:right"><b>${peso(c.amount)}</b></td>
+     <td>${esc(c.category)}</td><td>${esc(c.desc||"")}${c.noReceipt?`<div style="font-size:10px;color:var(--warn);font-weight:700">⚠ No O.R. — ${esc(c.noReceiptReason||"")}</div>`:""}</td><td style="text-align:right"><b>${peso(c.amount)}</b></td>
      <td>${claimTag(c.status)}${c.decidedBy?`<div style="font-size:10px;color:var(--muted)">${c.status==="Rejected"?"rejected":"approved"} by ${esc(c.decidedBy)}${c.decidedAt?" · "+esc(c.decidedAt.slice(0,10)):""}</div>`:""}</td>
-     <td><div class="rowact"><button class="icobtn" data-pclaim="${c.id}">Print</button>${c.hasReceipt?`<button class="icobtn" data-rcpt="${c.id}">Receipt</button>`:""}${(canAppr&&c.status==="Pending")?`<button class="icobtn go" data-aclaim="${c.id}">Approve</button><button class="icobtn del" data-rclaim="${c.id}">Reject</button>`:""}${(c.status==="Pending"&&c.requestedById===user.id)?`<button class="icobtn del" data-dclaim="${c.id}">Cancel</button>`:""}</div></td></tr>`).join("")}
+     <td><div class="rowact"><button class="icobtn" data-pclaim="${c.id}">Print</button>${(c.hasReceipt||c.receiptDocId)?`<button class="icobtn" data-rcpt="${c.id}">Receipt</button>`:(c.noReceipt?`<button class="icobtn" data-rcpt="${c.id}" title="No official receipt — see declared reason">No O.R.</button>`:"")}${(canAppr&&c.status==="Pending")?`<button class="icobtn go" data-aclaim="${c.id}">Approve</button><button class="icobtn del" data-rclaim="${c.id}">Reject</button>`:""}${(c.status==="Pending"&&c.requestedById===user.id)?`<button class="icobtn del" data-dclaim="${c.id}">Cancel</button>`:""}</div></td></tr>`).join("")}
    </tbody></table></div>`:'<div class="empty">No claims yet. Click “+ New petty cash / reimbursement” to submit one.</div>'}</div>`;
   document.getElementById("newClaim").onclick=()=>claimForm();
   if(canMng){const mt=document.getElementById("mngTypes");if(mt)mt.onclick=manageExpTypes;}
@@ -6510,24 +6510,30 @@ function receiptGallery(title,shots){
   const body=shots.length
     ? `<div style="display:flex;flex-direction:column;gap:14px">${shots.map(s=>`<div>
         <div style="font-size:11.5px;font-weight:700;color:var(--brand);margin-bottom:5px">${esc(s.label)}</div>
-        <img src="${s.src}" alt="${esc(s.label)}" style="max-width:100%;max-height:58vh;border-radius:8px;border:1px solid var(--line);display:block">
-        <div style="font-size:11px;color:var(--muted);margin-top:3px">Filed in Documents → ${RECEIPT_CAT}</div></div>`).join("")}</div>`
+        ${s.src?`<img src="${s.src}" alt="${esc(s.label)}" style="max-width:100%;max-height:58vh;border-radius:8px;border:1px solid var(--line);display:block">
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">Filed in Documents → ${RECEIPT_CAT}</div>`
+        :`<div class="notice" style="border-color:#e0b400;background:#fffbe8;margin:0"><b>No official receipt.</b> Declared reason: ${esc(s.note||"—")}</div>`}</div>`).join("")}</div>`
     : '<div style="color:var(--muted);font-size:12.5px">No receipt photos are attached to this request.</div>';
   openModal(title,body,[["Close","btn-out",closeModal]]);
 }
 async function viewClaimReceipt(id){
   const c=DB.claims.find(x=>x.id===id);
+  const label=c?`${c.type} · ${c.date} · ${peso(c.amount)}`:"Receipt";
+  if(c&&c.noReceipt){receiptGallery("No official receipt",[{label,note:c.noReceiptReason}]);return;}
   const src=await loadReceiptImg(c&&c.receiptDocId,id);
   if(!src){alert("No receipt photo is stored for this item.");return;}
-  receiptGallery("Receipt photo",[{label:(c?`${c.type} · ${c.date} · ${peso(c.amount)}`:"Receipt"),src}]);
+  receiptGallery("Receipt photo",[{label,src}]);
 }
 async function viewLiqReceipts(id){
   const l=DB.liquidations.find(x=>x.id===id);if(!l)return;
   const shots=[];
   for(let i=0;i<(l.rows||[]).length;i++){
-    const r=l.rows[i];if(!r.docId)continue;
+    const r=l.rows[i];
+    const label=`Item ${i+1} · ${r.orNo||"no O.R. no."} · ${r.supplier||r.category||""} · ${peso(r.amount)}`;
+    if(r.noReceipt){shots.push({label,note:r.noReceiptReason});continue;}
+    if(!r.docId)continue;
     const src=await loadReceiptImg(r.docId);
-    if(src)shots.push({label:`Item ${i+1} · ${r.orNo||"no O.R. no."} · ${r.supplier||r.category||""} · ${peso(r.amount)}`,src});
+    if(src)shots.push({label,src});
   }
   receiptGallery("Receipts — "+esc(l.refNo),shots);
 }
@@ -6541,17 +6547,30 @@ function claimForm(){
    <div class="fg"><label>Description / purpose</label><input id="f_cdesc" placeholder="e.g. Tricycle fare for site visit — Quintia residence"></div>
    <div class="fg"><label>Reference / O.R. no. (optional)</label><input id="f_cref" placeholder="receipt or reference number"></div>
    <div class="fg"><label>Photo of receipt (proof of original O.R.) <span style="color:var(--red)">*</span></label><input id="f_creceipt" type="file" accept="image/*"><div style="font-size:11px;color:var(--muted);margin-top:3px">Required — attach a clear photo of the actual receipt. It is filed to Documents → ${RECEIPT_CAT} for Accounting and kept as the company's proof.</div></div>
+   <div class="fg"><label style="display:flex;align-items:center;gap:7px;font-weight:500;font-size:12.5px;cursor:pointer"><input type="checkbox" id="f_cnorcpt" style="width:auto"> No official receipt available (e.g. tricycle fare, parking)</label>
+     <div id="f_cnorcptbox" style="display:none;margin-top:6px"><input id="f_cnoreason" placeholder="Why there is no O.R. — required">
+       <div style="font-size:11px;color:var(--warn);margin-top:3px">This declaration replaces the photo. It is shown to Finance, printed on the voucher and recorded in the audit log.</div></div></div>
    <div style="font-size:11px;color:var(--muted);margin-top:2px">This will be sent to Finance for approval. It is only posted to the books once Finance approves.</div>`,
    [["Cancel","btn-out",closeModal],["Submit to Finance","btn-primary",async()=>{
      const amount=+gv("f_camt")||0;if(amount<=0){alert("Enter an amount greater than zero.");return;}
      const desc=gv("f_cdesc").trim();if(!desc){alert("Please describe what this is for.");return;}
-     /* Proof is mandatory: no receipt photo, no submission. */
+     /* Proof is mandatory: either a receipt photo, or an explicit written
+        declaration that no official receipt exists. */
      const _fi=document.getElementById("f_creceipt");
-     if(!(_fi&&_fi.files&&_fi.files[0])){alert("A photo of the receipt is required before submitting.\n\nTake a clear picture of the original O.R. and attach it.");return;}
-     const receiptData=await svCompressP(_fi.files[0]);
-     if(!receiptData){alert("That image could not be read. Please attach a different photo of the receipt.");return;}
+     const _noR=!!(document.getElementById("f_cnorcpt")||{}).checked;
+     const _noReason=gv("f_cnoreason").trim();
+     let receiptData="";
+     if(_fi&&_fi.files&&_fi.files[0]){
+       receiptData=await svCompressP(_fi.files[0]);
+       if(!receiptData){alert("That image could not be read. Please attach a different photo of the receipt.");return;}
+     }else if(_noR){
+       if(!_noReason){alert("Please state why there is no official receipt.");return;}
+     }else{
+       alert("A photo of the receipt is required before submitting.\n\nTake a clear picture of the original O.R. and attach it — or tick “No official receipt available” and give the reason.");return;
+     }
      const c={id:uid(),type:gv("f_ctype"),date:gv("f_cdate"),category:gv("f_ccat"),amount,desc,ref:gv("f_cref").trim(),
-       requestedBy:user.name,requestedById:user.id,role:user.role,status:"Pending",decidedBy:"",decidedAt:"",expenseId:"",hasReceipt:!!receiptData,receiptDocId:""};
+       requestedBy:user.name,requestedById:user.id,role:user.role,status:"Pending",decidedBy:"",decidedAt:"",expenseId:"",hasReceipt:!!receiptData,receiptDocId:"",
+       noReceipt:!receiptData&&_noR,noReceiptReason:(!receiptData&&_noR)?_noReason:""};
      /* The proof photo is filed into Documents → Receipts so Accounting keeps a
         complete digital backup even if the claim is later cancelled. */
      if(receiptData){
@@ -6561,9 +6580,11 @@ function claimForm(){
      }
      DB.claims=await loadKey(K.claims,DB.claims);   /* refresh-before-write (shared array) */
      DB.claims.unshift(c);await saveKey(K.claims,DB.claims);
-     await logAudit("submit","claim",c.type,`${peso(amount)} · ${c.category} · pending Finance approval${c.receiptDocId?" · receipt filed to Documents":""}`);
+     await logAudit("submit","claim",c.type,`${peso(amount)} · ${c.category} · pending Finance approval${c.receiptDocId?" · receipt filed to Documents":""}${c.noReceipt?" · NO O.R. declared: "+c.noReceiptReason:""}`);
      closeModal();buildNav();viewClaims();
-     toast(receiptData?"Submitted to Finance — receipt filed in Documents":"Submitted to Finance","ok");}]]);
+     toast(receiptData?"Submitted to Finance — receipt filed in Documents":"Submitted to Finance — no-receipt declaration recorded","ok");}]]);
+  {const _nr=document.getElementById("f_cnorcpt"),_bx=document.getElementById("f_cnorcptbox"),_fl=document.getElementById("f_creceipt");
+   if(_nr)_nr.onchange=()=>{_bx.style.display=_nr.checked?"":"none";if(_nr.checked&&_fl)_fl.value="";if(_fl)_fl.disabled=_nr.checked;};}
 }
 async function approveClaim(id){
   if(!can("claims.approve")){alert("Only Finance can approve claims.");return;}
@@ -6604,7 +6625,7 @@ function printClaim(id){
    <div class="r"><span>Category</span><span>:</span><span class="v">${esc(c.category)}</span></div>
    <div class="r"><span>Status</span><span>:</span><span class="v">${esc(c.status)}</span></div></div>
    <table style="margin-top:14px"><thead><tr><th>Description / Purpose</th><th style="text-align:right">Amount</th></tr></thead>
-   <tbody><tr><td>${esc(c.desc||"")}${c.ref?`<div style="font-size:11px;color:#666">Ref / O.R. no.: ${esc(c.ref)}</div>`:""}</td><td style="text-align:right">${pPlain(c.amount)}</td></tr>
+   <tbody><tr><td>${esc(c.desc||"")}${c.ref?`<div style="font-size:11px;color:#666">Ref / O.R. no.: ${esc(c.ref)}</div>`:""}${c.noReceipt?`<div style="font-size:11px;color:#8a6100;font-weight:700;margin-top:3px">NO OFFICIAL RECEIPT — declared: ${esc(c.noReceiptReason||"")}</div>`:""}</td><td style="text-align:right">${pPlain(c.amount)}</td></tr>
    <tr style="font-weight:800;background:#faf9fd"><td style="text-align:right">TOTAL</td><td style="text-align:right">${peso(c.amount)}</td></tr></tbody></table>
    <div style="margin-top:48px;display:flex;justify-content:space-between;gap:40px">
      <div style="flex:1"><div style="font-weight:700;min-height:26px">${esc(c.requestedBy)}</div><div style="border-top:1px solid #333;padding-top:6px;font-size:12px">Requested / Received by</div></div>
@@ -6668,8 +6689,8 @@ function viewLiquidations(tabBar){
       <td>${liqReconTag(rc.status)}</td>
       <td>${liqWfTag(l.status)}</td>
       <td><div class="rowact">
-        ${(()=>{const n=(l.rows||[]).filter(r=>r.docId).length;const tot=(l.rows||[]).length;
-          return n?`<button class="icobtn" data-rliq="${l.id}" title="${n} of ${tot} item(s) have a receipt photo on file">Receipts ${n}/${tot}</button>`:"";})()}
+        ${(()=>{const n=(l.rows||[]).filter(r=>r.docId).length;const nd=(l.rows||[]).filter(r=>r.noReceipt).length;const tot=(l.rows||[]).length;
+          return (n||nd)?`<button class="icobtn" data-rliq="${l.id}" title="${n} of ${tot} item(s) have a receipt photo on file${nd?" · "+nd+" declared with no O.R.":""}">Receipts ${n}/${tot}${nd?` <span style="color:#b97b12">+${nd}✎</span>`:""}</button>`:"";})()}
         <button class="icobtn" data-pliq="${l.id}">Print</button>
         ${(canAppr&&l.status==="Submitted")?`<button class="icobtn go" data-revliq="${l.id}">Review</button>`:""}
         ${(canAppr&&l.status==="Reviewed")?`<button class="icobtn go" data-appliq="${l.id}">Approve</button>`:""}
@@ -6704,11 +6725,14 @@ function _liqRowCard(r,i){
     <div class="fg"><label>Description / particulars</label><input data-f="desc" value="${esc(r.desc||"")}" placeholder="What was bought / paid for"></div>
     <div class="fg"><label>Amount (PHP)</label><input type="number" data-f="amount" min="0" step="0.01" value="${r.amount||0}" style="text-align:right"></div>
     <div class="fg" style="margin-bottom:0"><label>Photo of this receipt (proof of the original O.R.) <span style="color:var(--red)">*</span></label>
-      ${r._photo
+      ${r.noReceipt?"":(r._photo
         ? `<div style="display:flex;align-items:center;gap:10px"><img src="${r._photo}" alt="Receipt preview" style="width:74px;height:74px;object-fit:cover;border-radius:7px;border:1px solid var(--line)"><div><div style="font-size:12px;font-weight:700;color:#1b8f50">✓ Photo attached</div><button type="button" class="icobtn del" data-rmphoto="${i}" style="margin-top:4px">Remove photo</button></div></div>`
         : (r.docId
           ? `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font-size:12px;font-weight:700;color:#1b8f50">✓ Receipt on file in Documents</span><input type="file" accept="image/*" data-photo="${i}" style="max-width:210px"><span style="font-size:11px;color:var(--muted)">choose a file to replace it</span></div>`
-          : `<input type="file" accept="image/*" data-photo="${i}"><div style="font-size:11px;color:var(--muted);margin-top:3px">Required — attach the actual O.R. photo. It is filed to Documents → ${RECEIPT_CAT} for Accounting.</div>`)}
+          : `<input type="file" accept="image/*" data-photo="${i}"><div style="font-size:11px;color:var(--muted);margin-top:3px">Required — attach the actual O.R. photo. It is filed to Documents → ${RECEIPT_CAT} for Accounting.</div>`))}
+      <label style="display:flex;align-items:center;gap:7px;font-size:12px;margin-top:7px;cursor:pointer"><input type="checkbox" data-fc="noReceipt" ${r.noReceipt?"checked":""} style="width:auto"> No official receipt available for this item</label>
+      ${r.noReceipt?`<input data-f="noReceiptReason" value="${esc(r.noReceiptReason||"")}" placeholder="Why there is no O.R. — required (e.g. tricycle fare, no receipt issued)" style="margin-top:6px">
+        <div style="font-size:11px;color:var(--warn);margin-top:3px">Shown to Finance, printed on the voucher and recorded in the audit log.</div>`:""}
     </div>
   </div>`;
 }
@@ -6748,6 +6772,10 @@ function _liqWireRows(){
     };
     const rm=card.querySelector("[data-rmphoto]");
     if(rm)rm.onclick=()=>{delete _liqRows[i]._photo;_liqWireRows();};
+    /* "No official receipt" declaration replaces the photo for this line. */
+    card.querySelectorAll("[data-fc]").forEach(cb=>{
+      cb.onchange=()=>{_liqRows[i][cb.dataset.fc]=cb.checked;if(cb.checked)delete _liqRows[i]._photo;_liqWireRows();};
+    });
   });
 }
 function liqForm(id){
@@ -6776,9 +6804,15 @@ function liqForm(id){
       if(!valid.length){alert("Add at least one expense item with an amount.");return;}
       /* Proof is mandatory per line — each item is a separate O.R. Name the
          exact items that are missing one so the custodian knows what to fix. */
-      const missing=[];
-      _liqRows.forEach((r,i)=>{if((+r.amount||0)>0&&!r._photo&&!r.docId)missing.push(`Item ${i+1}${r.orNo?" ("+r.orNo+")":""}${r.supplier?" — "+r.supplier:""}`);});
-      if(missing.length){alert("A receipt photo is required for every expense item.\n\nStill missing:\n• "+missing.join("\n• "));return;}
+      const missing=[],needReason=[];
+      _liqRows.forEach((r,i)=>{
+        if((+r.amount||0)<=0)return;
+        const label=`Item ${i+1}${r.orNo?" ("+r.orNo+")":""}${r.supplier?" — "+r.supplier:""}`;
+        if(r.noReceipt){if(!String(r.noReceiptReason||"").trim())needReason.push(label);return;}
+        if(!r._photo&&!r.docId)missing.push(label);
+      });
+      if(needReason.length){alert("State why there is no official receipt for:\n• "+needReason.join("\n• "));return;}
+      if(missing.length){alert("A receipt photo is required for every expense item.\n\nStill missing:\n• "+missing.join("\n• ")+"\n\nIf an item genuinely has no O.R., tick “No official receipt available” on that item and give the reason.");return;}
       const fund=+gv("f_lfund")||0;
       const cc=gv("f_lcash");
       /* File each newly attached O.R. photo into Documents → Receipts, keeping
@@ -6793,7 +6827,8 @@ function liqForm(id){
         if(id2){r.docId=id2;delete r._photo;filed++;}
       }
       const d={refNo,date:gv("f_ldate"),custodian:cust,dept:gv("f_ldept").trim(),fundAmount:fund,
-        rows:_liqRows.map(r=>({date:r.date||"",orNo:(r.orNo||"").trim(),supplier:(r.supplier||"").trim(),desc:(r.desc||"").trim(),category:r.category||"Other",amount:+r.amount||0,docId:r.docId||""})),
+        rows:_liqRows.map(r=>({date:r.date||"",orNo:(r.orNo||"").trim(),supplier:(r.supplier||"").trim(),desc:(r.desc||"").trim(),category:r.category||"Other",amount:+r.amount||0,docId:r.docId||"",
+          noReceipt:!!r.noReceipt,noReceiptReason:r.noReceipt?String(r.noReceiptReason||"").trim():""})),
         cashCounted:cc===""?"":(+cc||0)};
       if(editing){Object.assign(editing,d);await logAudit("update","liquidation",refNo,`${peso(liqTotal(editing))} · ${cust}${filed?` · ${filed} receipt(s) filed`:""}`);}
       else{const l={id:uid(),...d,status:"Submitted",preparedBy:user.name,preparedById:user.id,preparedAt:new Date().toISOString(),reviewedBy:"",reviewedById:"",reviewedAt:"",approvedBy:"",approvedAt:"",expenseIds:[]};DB.liquidations.unshift(l);await logAudit("submit","liquidation",refNo,`${peso(liqTotal(l))} · ${cust} · pending review${filed?` · ${filed} receipt(s) filed to Documents`:""}`);}
@@ -6843,7 +6878,7 @@ async function delLiquidation(id){
 function printLiquidation(id){
   const l=DB.liquidations.find(x=>x.id===id);if(!l)return;
   const rc=liqRecon(l);
-  const rowsHtml=(l.rows||[]).map((r,i)=>`<tr><td style="text-align:center">${i+1}</td><td>${esc(r.date||"")}</td><td>${esc(r.orNo||"—")}${r.docId?' <span style="color:#1a7f37;font-size:9px">✓ photo</span>':""}</td><td>${esc(r.supplier||"—")}</td><td>${esc(r.desc||"")}</td><td>${esc(r.category||"")}</td><td style="text-align:right">${pPlain(r.amount)}</td></tr>`).join("");
+  const rowsHtml=(l.rows||[]).map((r,i)=>`<tr><td style="text-align:center">${i+1}</td><td>${esc(r.date||"")}</td><td>${esc(r.orNo||"—")}${r.docId?' <span style="color:#1a7f37;font-size:9px">✓ photo</span>':(r.noReceipt?' <span style="color:#8a6100;font-size:9px">no O.R.</span>':"")}</td><td>${esc(r.supplier||"—")}</td><td>${esc(r.desc||"")}${r.noReceipt?`<div style="font-size:9.5px;color:#8a6100">Declared: ${esc(r.noReceiptReason||"")}</div>`:""}</td><td>${esc(r.category||"")}</td><td style="text-align:right">${pPlain(r.amount)}</td></tr>`).join("");
   const sign=(nm,role,at)=>`<div style="flex:1"><div style="font-weight:700;min-height:24px">${esc(nm||"")}</div><div style="border-top:1px solid #333;padding-top:6px;font-size:12px">${role}${at?` <span style="color:#1a7f37">(${esc(at.slice(0,10))})</span>`:""}</div></div>`;
   printDoc("Petty Cash Liquidation — "+l.refNo,`<div class="page"><div class="page-inner">${printHeader("PETTY CASH LIQUIDATION")}
     <div class="kv"><div class="r"><span>Liquidation Ref No.</span><span>:</span><span class="v brand">${esc(l.refNo)}</span></div>
