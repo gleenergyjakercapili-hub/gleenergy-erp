@@ -4346,9 +4346,9 @@ function projInfoView(){
   const rows=_pa.map(p=>{
     const cl=projClient(p),st=projInfoStatus(p),sp=projSpend(p);
     const varr=(+p.value||0)-sp.actual;
-    const key=esc(((p.name||"")+" "+(p.clientName||"")+" "+(p.siteName||"")+" "+(p.engineer||"")+" "+(p.sales||"")).toLowerCase());
+    const key=esc(((p.name||"")+" "+(p.clientName||"")+" "+(p.siteName||"")+" "+(p.engineer||"")+" "+(p.sales||"")+" "+(p.systemSize||"")+" "+(p.milestone||"")).toLowerCase());
     return `<tr data-search="${key}" data-focus="${p.id}">
-     <td><b>${esc(p.clientName||"—")}</b><div style="font-size:11px;color:var(--muted)">${esc(p.name||"")}</div></td>
+     <td><b>${esc(p.clientName||"—")}</b><div style="font-size:11px;color:var(--muted)">${esc(p.name||"")}</div>${p.systemSize?`<div style="font-size:11px;color:var(--brand-2);font-weight:600">${esc(p.systemSize)}</div>`:""}</td>
      <td style="font-size:12px;max-width:170px">${esc((cl&&cl.address)||"—")}</td>
      <td style="font-size:12px">${cl?(cl.contactPerson?`${esc(cl.contactPerson)}<div style="font-size:11px;color:var(--muted)">${esc(cl.contactPhone||cl.phone||"")}</div>`:esc(cl.phone||"—")):"—"}</td>
      <td style="font-size:12px">${esc(p.siteName||"—")}</td>
@@ -4359,7 +4359,7 @@ function projInfoView(){
      <td style="white-space:nowrap">${esc(p.targetDate||"—")}</td>
      <td style="white-space:nowrap">${esc(p.dateCompleted||"—")}</td>
      <td style="font-size:12px">${esc(p.engineer||"—")}${p.sales?`<div style="font-size:11px;color:var(--muted)">${esc(p.sales)}</div>`:""}</td>
-     <td><span class="tag ${st.cls}">${st.t}</span></td>
+     <td><span class="tag ${st.cls}">${st.t}</span>${p.milestone?`<div style="font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap">${esc(p.milestone)} · ${(+p.value?Math.round(projCollected(p.id)/(+p.value)*100):0)}% collected</div>`:""}</td>
      <td><div class="rowact"><button class="icobtn go" data-open="${p.id}">Open</button>${ed?`<button class="icobtn" data-pinfo="${p.id}">Edit</button>`:""}</div></td></tr>`;}).join("");
   V().innerHTML=projTabSegHTML()+tiles+`
    <div class="panel"><div class="panel-head"><div><h3>Project Information</h3><div class="panel-sub">Address &amp; contact come from the client record; actual expenses from the books; status from the dates.</div></div><div class="tools">
@@ -4373,8 +4373,8 @@ function projInfoView(){
   const filt=()=>{const t=(q.value||"").toLowerCase().trim();let n=0;V().querySelectorAll("tbody tr[data-search]").forEach(tr=>{const hit=!t||tr.dataset.search.includes(t);tr.style.display=hit?"":"none";if(hit)n++;});const nm=document.getElementById("piNoMatch");if(nm)nm.style.display=n?"none":"";};
   q.oninput=()=>{projInfoSearch=q.value;filt();};filt();
   document.getElementById("piExp").onclick=()=>exportCSV("project_information.csv",
-    ["Client","Project","Address","Contact","Site name","Contract price","Actual expenses","Variance","Date started","Target completion","Date completed","Engineer","Sales","Status"],
-    _pa.map(p=>{const cl=projClient(p),sp=projSpend(p);return [p.clientName,p.name,(cl&&cl.address)||"",projContactStr(cl),p.siteName||"",p.value||0,sp.actual,(+p.value||0)-sp.actual,p.dateStarted||"",p.targetDate||"",p.dateCompleted||"",p.engineer||"",p.sales||"",projInfoStatus(p).t];}));
+    ["Client","Project","System size","Address","Contact","Site name","Contract price","Actual expenses","Variance","Date started","Target completion","Date completed","Engineer","Sales","Status","Milestone","Collected %"],
+    _pa.map(p=>{const cl=projClient(p),sp=projSpend(p);return [p.clientName,p.name,p.systemSize||"",(cl&&cl.address)||"",projContactStr(cl),p.siteName||"",p.value||0,sp.actual,(+p.value||0)-sp.actual,p.dateStarted||"",p.targetDate||"",p.dateCompleted||"",p.engineer||"",p.sales||"",projInfoStatus(p).t,p.milestone||"",(+p.value?Math.round(projCollected(p.id)/(+p.value)*100):0)];}));
   document.getElementById("piPrint").onclick=()=>printProjInfo(_pa);
   V().querySelectorAll("[data-open]").forEach(b=>b.onclick=()=>openProject(b.dataset.open));
   V().querySelectorAll("[data-pinfo]").forEach(b=>b.onclick=()=>projInfoForm(b.dataset.pinfo));
@@ -4389,6 +4389,9 @@ function projInfoForm(id){
   openModal("Project information — "+esc(p.name),`
    <div style="font-size:11.5px;color:var(--muted);margin-bottom:8px">Address &amp; contact are pulled from the client record${cl?` (<b>${esc(cl.name)}</b> — ${esc(cl.address||"no address")}, ${esc(projContactStr(cl)||"no contact")})`:""} — edit them in Clients / CRM once and every project follows.</div>
    <div class="fg"><label>Site name</label><input id="pi_site" value="${esc(p.siteName||"")}" placeholder="e.g. SRS San Isidro rooftop"></div>
+   <div class="grid2"><div class="fg"><label>System size &amp; type</label><input id="pi_sys" value="${esc(p.systemSize||"")}" placeholder="e.g. 11.43kW PV · 10kW GTI · 16kWhr battery"></div>
+    <div class="fg"><label>Milestone (payment phase)</label><select id="pi_mile">${["","P1","P2","P3"].map(m=>`<option value="${m}" ${(p.milestone||"")===m?"selected":""}>${m||"—"}</option>`).join("")}</select>
+     <div style="font-size:11px;color:var(--muted);margin-top:3px">${(()=>{const c=projCollected(p.id),v=+p.value||0;return v?pPlain(c)+" collected · "+Math.round(c/v*100)+"% of contract":"";})()}</div></div></div>
    <div class="grid3"><div class="fg"><label>Date started</label><input id="pi_start" type="date" value="${esc(p.dateStarted||"")}"></div>
     <div class="fg"><label>Target completion</label><input id="pi_target" type="date" value="${esc(p.targetDate||"")}"></div>
     <div class="fg"><label>Date completed</label><input id="pi_done" type="date" value="${esc(p.dateCompleted||"")}"></div></div>
@@ -4396,7 +4399,8 @@ function projInfoForm(id){
     <div class="fg"><label>Sales</label><input id="pi_sales" list="piSals" value="${esc(p.sales||"")}"><datalist id="piSals">${sals.map(n=>`<option value="${esc(n)}"></option>`).join("")}</datalist></div></div>
    <div style="font-size:11px;color:var(--muted)">Status is derived automatically: no start date → Not started · started → In progress (Delayed once past target) · completion date → Completed.</div>`,
    [["Cancel","btn-out",closeModal],["Save","btn-primary",async()=>{
-     Object.assign(p,{siteName:gv("pi_site").trim(),dateStarted:gv("pi_start"),targetDate:gv("pi_target"),
+     Object.assign(p,{siteName:gv("pi_site").trim(),systemSize:gv("pi_sys").trim(),milestone:gv("pi_mile"),
+       dateStarted:gv("pi_start"),targetDate:gv("pi_target"),
        dateCompleted:gv("pi_done"),engineer:gv("pi_eng").trim(),sales:gv("pi_sales").trim()});
      if(p.dateCompleted&&p.stage!=="Handover")p.stage="Handover";   /* completed projects leave the active pipeline */
      await saveKey(K.proj,DB.projects);
@@ -4409,11 +4413,11 @@ function printProjInfo(list){
    <div class="r"><span>Prepared by</span><span>:</span><span class="v">${esc((user&&user.name)||"")}</span></div></div>
    <table class="pi-tbl" style="margin-top:12px"><colgroup><col style="width:14%"><col style="width:13%"><col style="width:12%"><col style="width:9%"><col style="width:9%"><col style="width:8%"><col style="width:8%"><col style="width:8%"><col style="width:11%"><col style="width:8%"></colgroup><thead><tr><th>Client</th><th>Site</th><th>Contact</th><th style="text-align:right">Contract</th><th style="text-align:right">Actual exp.</th><th>Started</th><th>Target</th><th>Completed</th><th>Engr / Sales</th><th>Status</th></tr></thead><tbody>
    ${list.map(p=>{const cl=projClient(p),sp=projSpend(p),st=projInfoStatus(p);
-     return `<tr><td><b>${esc(p.clientName||"")}</b><br><span style="color:#666">${esc(p.name||"")}</span></td>
+     return `<tr><td><b>${esc(p.clientName||"")}</b><br><span style="color:#666">${esc(p.name||"")}</span>${p.systemSize?`<br><span style="color:#555">${esc(p.systemSize)}</span>`:""}</td>
       <td>${esc(p.siteName||(cl&&cl.address)||"")}</td><td>${esc(projContactStr(cl))}</td>
       <td style="text-align:right">${pPlain(p.value||0)}</td><td style="text-align:right">${sp.actual?pPlain(sp.actual):"—"}</td>
       <td>${esc(p.dateStarted||"—")}</td><td>${esc(p.targetDate||"—")}</td><td>${esc(p.dateCompleted||"—")}</td>
-      <td>${esc(p.engineer||"—")}${p.sales?" / "+esc(p.sales):""}</td><td>${st.t}</td></tr>`;}).join("")}
+      <td>${esc(p.engineer||"—")}${p.sales?" / "+esc(p.sales):""}</td><td>${st.t}${p.milestone?" · "+esc(p.milestone):""}</td></tr>`;}).join("")}
    </tbody></table>
    <div style="margin-top:40px;display:flex;gap:40px"><div style="flex:1;border-top:1px solid #333;padding-top:5px;font-size:11px;text-align:center">Prepared by (Operations)</div><div style="flex:1;border-top:1px solid #333;padding-top:5px;font-size:11px;text-align:center">Noted by</div></div>
    <div style="margin-top:auto;font-size:10px;color:#888;padding:5mm 0 2mm">Generated ${new Date().toLocaleString()}</div></div></div>`);
