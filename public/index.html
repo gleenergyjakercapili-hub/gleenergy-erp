@@ -1505,10 +1505,21 @@ async function init(){
   DB.purchaserequests=await loadKey(K.pr,[]);
   DB.surveys=await loadKey(K.surveys,[]);
   DB.exptypes=await loadKey(K.exptypes,null)||(await saveKey(K.exptypes,seedExpTypes()),seedExpTypes());
-  /* Project Report rollout: the OM's workbook tracks Toll and Lalamove as their
-     own cost columns, so they must exist as taggable expense types. One-time
-     (flag on rbac) so a deliberate later removal stays removed. */
-  if(!DB.rbac._expToll){["Toll","Lalamove"].forEach(t=>{if(!DB.exptypes.includes(t))DB.exptypes.push(t);});DB.rbac._expToll=true;await saveKey(K.exptypes,DB.exptypes);await saveKey(K.rbac,DB.rbac);}
+  /* An EMPTY stored list is truthy, so the seed above never runs for it — that
+     left the live system with almost no categories after the demo wipe. Treat
+     empty as "not set up yet". */
+  if(!Array.isArray(DB.exptypes)||!DB.exptypes.length){DB.exptypes=seedExpTypes();await saveKey(K.exptypes,DB.exptypes);}
+  /* One-time: restore the full standard category set on systems that ended up
+     with a stub list, WITHOUT discarding anything Finance added themselves —
+     the standard names lead, custom ones follow. Existing records keep their
+     own category string regardless. */
+  if(!DB.rbac._expTypesFull){
+    const std=seedExpTypes();
+    const custom=(DB.exptypes||[]).filter(t=>std.indexOf(t)<0);
+    DB.exptypes=std.concat(custom);
+    DB.rbac._expTypesFull=true;
+    await saveKey(K.exptypes,DB.exptypes);await saveKey(K.rbac,DB.rbac);
+  }
   let _chg=false; DB.employees.forEach(e=>{if(e.basic===undefined){e.basic=roleBasic(e.role);_chg=true;} if(e.payFreq===undefined){e.payFreq=WEEKLY_ROLES.includes(e.role)?"Weekly":"Semi-monthly";_chg=true;}
     /* Labor is paid weekly by definition. Payroll runs select employees by pay frequency,
        so a labor row left on Semi-monthly would fall into the wrong run. */
@@ -4455,7 +4466,9 @@ function projReportRow(p){
   const exps=(DB.expenses||[]).filter(e=>e.projectId===p.id);
   const cat=n=>exps.filter(e=>(e.category||"")===n).reduce((s,e)=>s+(+e.amount||0),0);
   const total=exps.reduce((s,e)=>s+(+e.amount||0),0);
-  const mat=cat("Materials"),fuel=cat("Fuel"),toll=cat("Toll"),lala=cat("Lalamove"),labor=cat("Labor");
+  /* "Gas" is the category staff actually pick; "Fuel" is the older name and any
+     legacy records still carry it — both belong in the same report column. */
+  const mat=cat("Materials"),fuel=cat("Gas")+cat("Fuel"),toll=cat("Toll"),lala=cat("Lalamove"),labor=cat("Labor");
   const r2=v=>Math.round(v*100)/100;   /* keep derived figures clean of float residue */
   const other=r2(total-mat-fuel-toll-lala-labor);
   const contract=+p.value||0, collected=projCollected(p.id);
@@ -4473,7 +4486,7 @@ function projReportView(){
     <button class="btn btn-light" id="prExpCsv">Export CSV</button></div></div>
   <div style="padding:10px 16px 16px">
   <div class="panel-intro">Every figure is computed live from the books — collections drive Downpayment and Balance, expenses tagged to each project fill the cost columns (Materials, Fuel, Toll, Lalamove, Payroll), and Gross net = Contract − all project spend. ${rows.length} project(s) · nothing here is typed by hand.</div>
-  <div class="tbl-scroll"><table><thead><tr><th>Project</th><th>Engr / Sales</th><th>Status</th><th style="text-align:right">Panels</th><th style="text-align:right">Contract</th><th style="text-align:right">Downpayment</th><th style="text-align:right">Balance</th><th style="text-align:right">Materials</th><th style="text-align:right">Fuel</th><th style="text-align:right">Toll</th><th style="text-align:right">Lalamove</th><th style="text-align:right">Payroll</th><th style="text-align:right">Other exp.</th><th style="text-align:right">Gross net</th></tr></thead><tbody>
+  <div class="tbl-scroll"><table><thead><tr><th>Project</th><th>Engr / Sales</th><th>Status</th><th style="text-align:right">Panels</th><th style="text-align:right">Contract</th><th style="text-align:right">Downpayment</th><th style="text-align:right">Balance</th><th style="text-align:right">Materials</th><th style="text-align:right">Gas / Fuel</th><th style="text-align:right">Toll</th><th style="text-align:right">Lalamove</th><th style="text-align:right">Payroll</th><th style="text-align:right">Other exp.</th><th style="text-align:right">Gross net</th></tr></thead><tbody>
   ${rows.length?rows.map(r=>`<tr><td><b>${esc(r.p.clientName||"")}</b><div style="font-size:11px;color:var(--muted)">${esc(r.p.name||"")}</div></td>
     <td>${esc(r.p.engineer||"—")}${r.p.sales?" / "+esc(r.p.sales):""}</td><td><span class="tag ${r.st.cls}">${r.st.t}</span></td>
     <td style="text-align:right">${r.panels||"—"}</td><td style="text-align:right">${pPlain(r.contract)}</td>
@@ -4484,7 +4497,7 @@ function projReportView(){
   </tbody>${rows.length?`<tfoot><tr style="font-weight:700;background:#faf9fd"><td>TOTAL · ${rows.length}</td><td></td><td></td><td style="text-align:right">${T("panels")||""}</td><td style="text-align:right">${pPlain(T("contract"))}</td><td style="text-align:right">${pPlain(T("collected"))}</td><td style="text-align:right">${pPlain(T("balance"))}</td><td style="text-align:right">${pPlain(T("mat"))}</td><td style="text-align:right">${pPlain(T("fuel"))}</td><td style="text-align:right">${pPlain(T("toll"))}</td><td style="text-align:right">${pPlain(T("lala"))}</td><td style="text-align:right">${pPlain(T("labor"))}</td><td style="text-align:right">${pPlain(T("other"))}</td><td style="text-align:right">${pPlain(T("gross"))}</td></tr></tfoot>`:""}</table></div></div></div>`;
   const b=document.getElementById("prExpCsv");
   if(b)b.onclick=()=>exportCSV("project-report.csv",
-    ["Project","Client","Engineer","Sales","Status","Panels","Contract","Downpayment","Balance","Materials","Fuel","Toll","Lalamove","Payroll","Other","GrossNet"],
+    ["Project","Client","Engineer","Sales","Status","Panels","Contract","Downpayment","Balance","Materials","Gas/Fuel","Toll","Lalamove","Payroll","Other","GrossNet"],
     rows.map(r=>[r.p.name||"",r.p.clientName||"",r.p.engineer||"",r.p.sales||"",r.st.t,r.panels,r.contract,r.collected,r.balance,r.mat,r.fuel,r.toll,r.lala,r.labor,r.other,r.gross]));
 }
 function printProjReport(){
@@ -4494,7 +4507,7 @@ function printProjReport(){
   printDoc("Project Report",`<div class="page"><div class="page-inner">${printHeader("PROJECT REPORT")}
    <div class="kv"><div class="r"><span>As of</span><span>:</span><span class="v brand">${esc(todayStr())}</span></div>
    <div class="r"><span>Prepared by</span><span>:</span><span class="v">${esc((user&&user.name)||"")}</span></div></div>
-   <table class="pi-tbl" style="margin-top:12px"><colgroup><col style="width:13%"><col style="width:9%"><col style="width:7%">${'<col style="width:7.1%">'.repeat(10)}</colgroup><thead><tr><th>Project</th><th>Engr/Sales</th><th>Status</th><th style="text-align:right">Contract</th><th style="text-align:right">Downpmt</th><th style="text-align:right">Balance</th><th style="text-align:right">Materials</th><th style="text-align:right">Fuel</th><th style="text-align:right">Toll</th><th style="text-align:right">Lalamove</th><th style="text-align:right">Payroll</th><th style="text-align:right">Other</th><th style="text-align:right">Gross net</th></tr></thead><tbody>
+   <table class="pi-tbl" style="margin-top:12px"><colgroup><col style="width:13%"><col style="width:9%"><col style="width:7%">${'<col style="width:7.1%">'.repeat(10)}</colgroup><thead><tr><th>Project</th><th>Engr/Sales</th><th>Status</th><th style="text-align:right">Contract</th><th style="text-align:right">Downpmt</th><th style="text-align:right">Balance</th><th style="text-align:right">Materials</th><th style="text-align:right">Gas / Fuel</th><th style="text-align:right">Toll</th><th style="text-align:right">Lalamove</th><th style="text-align:right">Payroll</th><th style="text-align:right">Other</th><th style="text-align:right">Gross net</th></tr></thead><tbody>
    ${rows.map(r=>`<tr><td><b>${esc(r.p.clientName||"")}</b><br><span style="color:#666">${esc(r.p.name||"")}</span></td><td>${esc(r.p.engineer||"—")}${r.p.sales?" / "+esc(r.p.sales):""}</td><td>${r.st.t}</td><td style="text-align:right">${pPlain(r.contract)}</td>${n(r.collected)}<td style="text-align:right">${pPlain(r.balance)}</td>${n(r.mat)}${n(r.fuel)}${n(r.toll)}${n(r.lala)}${n(r.labor)}${n(r.other)}<td style="text-align:right"><b>${pPlain(r.gross)}</b></td></tr>`).join("")}
    <tr><td><b>TOTAL</b></td><td></td><td></td><td style="text-align:right"><b>${pPlain(T("contract"))}</b></td><td style="text-align:right"><b>${pPlain(T("collected"))}</b></td><td style="text-align:right"><b>${pPlain(T("balance"))}</b></td><td style="text-align:right"><b>${pPlain(T("mat"))}</b></td><td style="text-align:right"><b>${pPlain(T("fuel"))}</b></td><td style="text-align:right"><b>${pPlain(T("toll"))}</b></td><td style="text-align:right"><b>${pPlain(T("lala"))}</b></td><td style="text-align:right"><b>${pPlain(T("labor"))}</b></td><td style="text-align:right"><b>${pPlain(T("other"))}</b></td><td style="text-align:right"><b>${pPlain(T("gross"))}</b></td></tr>
    </tbody></table>
@@ -6468,7 +6481,11 @@ function expForm(id){
 async function delExp(id){if(!can("records.delete")){alert("Only the GM/CEO can delete records.");return;}const e=DB.expenses.find(x=>x.id===id);if(!e)return;if(!await uiConfirm("Delete this expense?"))return;DB.expenses=DB.expenses.filter(x=>x.id!==id);await saveKey(K.exp,DB.expenses);await logAudit("delete","expense",e.category,"Deleted");viewFinance();}
 
 /* ============ PETTY CASH & CLAIMS ============ */
-function seedExpTypes(){return ["Materials","Labor","Transport","Fuel","Toll","Lalamove","Meals & Allowance","Office Supplies","Tools & Consumables","Permits & Gov't Fees","Communication","Site/Project Misc","Overhead","Other"];}
+/* Shared expense categories — used by BOTH the reimbursement/quick-claim form
+   and every petty cash liquidation line, so the two always match. The Project
+   Report totals Materials, Gas/Fuel, Toll, Lalamove and Labor into their own
+   columns; everything else lands in "Other exp." */
+function seedExpTypes(){return ["Materials","Labor","Gas","Toll","Parking","Food & Meals","Transport / Fare","Lalamove","Office Supplies","Tools & Consumables","Permits & Gov't Fees","Communication","Site/Project Misc","Overhead","Other"];}
 function claimTag(s){const m={"Pending":"t-lead","Approved":"t-won","Rejected":"t-rejected"};return `<span class="tag ${m[s]||'t-lead'}">${esc(s)}</span>`;}
 function viewClaims(){
   const canAppr=can("claims.approve"), canMng=can("exptypes.manage");
