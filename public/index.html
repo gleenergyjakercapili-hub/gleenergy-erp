@@ -6483,10 +6483,53 @@ function viewClaims(){
   V().querySelectorAll("[data-rclaim]").forEach(b=>b.onclick=()=>rejectClaim(b.dataset.rclaim));
   V().querySelectorAll("[data-dclaim]").forEach(b=>b.onclick=()=>cancelClaim(b.dataset.dclaim));
 }
+/* ===== Receipt filing — every proof photo lands in Documents =====
+   A receipt is stored ONCE, under the Documents convention (p2:docfile:<id>),
+   and indexed in the Documents module under the "Receipts" category. That gives
+   Accounting a complete, searchable digital backup of every original O.R.
+   without keeping a second copy of the image. Returns the document id. */
+const RECEIPT_CAT="Receipts";
+async function fileReceiptDoc(dataUrl,name,linked){
+  if(!dataUrl)return "";
+  const docId=uid();
+  const ok=await rawSet("p2:docfile:"+docId,dataUrl);
+  if(!ok)return "";
+  DB.documents=await loadKey(K.doc,DB.documents);   /* refresh-before-write (shared array) */
+  DB.documents.unshift({id:docId,name:name||("Receipt "+todayStr()+".jpg"),size:Math.round(dataUrl.length*3/4),
+    category:RECEIPT_CAT,linked:linked||"",by:(user&&user.name)||"",ts:new Date().toISOString()});
+  await saveKey(K.doc,DB.documents);
+  return docId;
+}
+async function loadReceiptImg(docId,legacyClaimId){
+  let r=null;
+  if(docId){try{r=await window.storage.get("p2:docfile:"+docId,true);}catch(e){}}
+  if((!r||!r.value)&&legacyClaimId){try{r=await window.storage.get("p2:claimrcpt:"+legacyClaimId,true);}catch(e){}}
+  return (r&&r.value)?r.value:"";
+}
+function receiptGallery(title,shots){
+  const body=shots.length
+    ? `<div style="display:flex;flex-direction:column;gap:14px">${shots.map(s=>`<div>
+        <div style="font-size:11.5px;font-weight:700;color:var(--brand);margin-bottom:5px">${esc(s.label)}</div>
+        <img src="${s.src}" alt="${esc(s.label)}" style="max-width:100%;max-height:58vh;border-radius:8px;border:1px solid var(--line);display:block">
+        <div style="font-size:11px;color:var(--muted);margin-top:3px">Filed in Documents → ${RECEIPT_CAT}</div></div>`).join("")}</div>`
+    : '<div style="color:var(--muted);font-size:12.5px">No receipt photos are attached to this request.</div>';
+  openModal(title,body,[["Close","btn-out",closeModal]]);
+}
 async function viewClaimReceipt(id){
-  let r=null;try{r=await window.storage.get("p2:claimrcpt:"+id,true);}catch(e){}
-  if(!r||!r.value){alert("No receipt photo is stored for this item.");return;}
-  openModal("Receipt photo",`<div style="text-align:center"><img src="${r.value}" alt="Receipt" style="max-width:100%;max-height:68vh;border-radius:8px;border:1px solid var(--line)"></div>`,[["Close","btn-out",closeModal]]);
+  const c=DB.claims.find(x=>x.id===id);
+  const src=await loadReceiptImg(c&&c.receiptDocId,id);
+  if(!src){alert("No receipt photo is stored for this item.");return;}
+  receiptGallery("Receipt photo",[{label:(c?`${c.type} · ${c.date} · ${peso(c.amount)}`:"Receipt"),src}]);
+}
+async function viewLiqReceipts(id){
+  const l=DB.liquidations.find(x=>x.id===id);if(!l)return;
+  const shots=[];
+  for(let i=0;i<(l.rows||[]).length;i++){
+    const r=l.rows[i];if(!r.docId)continue;
+    const src=await loadReceiptImg(r.docId);
+    if(src)shots.push({label:`Item ${i+1} · ${r.orNo||"no O.R. no."} · ${r.supplier||r.category||""} · ${peso(r.amount)}`,src});
+  }
+  receiptGallery("Receipts — "+esc(l.refNo),shots);
 }
 function claimForm(){
   const types=DB.exptypes||seedExpTypes();
@@ -6505,11 +6548,19 @@ function claimForm(){
      let receiptData="";const _fi=document.getElementById("f_creceipt");
      if(_fi&&_fi.files&&_fi.files[0]){receiptData=await svCompressP(_fi.files[0]);}
      const c={id:uid(),type:gv("f_ctype"),date:gv("f_cdate"),category:gv("f_ccat"),amount,desc,ref:gv("f_cref").trim(),
-       requestedBy:user.name,requestedById:user.id,role:user.role,status:"Pending",decidedBy:"",decidedAt:"",expenseId:"",hasReceipt:!!receiptData};
+       requestedBy:user.name,requestedById:user.id,role:user.role,status:"Pending",decidedBy:"",decidedAt:"",expenseId:"",hasReceipt:!!receiptData,receiptDocId:""};
+     /* The proof photo is filed into Documents → Receipts so Accounting keeps a
+        complete digital backup even if the claim is later cancelled. */
+     if(receiptData){
+       c.receiptDocId=await fileReceiptDoc(receiptData,
+         `Receipt — ${c.type} ${(c.id||"").slice(0,8).toUpperCase()} — ${user.name} — ${c.date}.jpg`,
+         `${c.type} · ${c.category}${c.ref?" · "+c.ref:""}`);
+     }
+     DB.claims=await loadKey(K.claims,DB.claims);   /* refresh-before-write (shared array) */
      DB.claims.unshift(c);await saveKey(K.claims,DB.claims);
-     if(receiptData){try{await rawSet("p2:claimrcpt:"+c.id,receiptData);}catch(e){}}
-     await logAudit("submit","claim",c.type,`${peso(amount)} · ${c.category} · pending Finance approval`);
-     closeModal();buildNav();viewClaims();}]]);
+     await logAudit("submit","claim",c.type,`${peso(amount)} · ${c.category} · pending Finance approval${c.receiptDocId?" · receipt filed to Documents":""}`);
+     closeModal();buildNav();viewClaims();
+     toast(receiptData?"Submitted to Finance — receipt filed in Documents":"Submitted to Finance","ok");}]]);
 }
 async function approveClaim(id){
   if(!can("claims.approve")){alert("Only Finance can approve claims.");return;}
@@ -6532,8 +6583,10 @@ async function rejectClaim(id){
 async function cancelClaim(id){
   const c=DB.claims.find(x=>x.id===id);if(!c)return;
   if(c.requestedById!==user.id||c.status!=="Pending"){alert("You can only cancel your own pending claims.");return;}
-  if(!await uiConfirm("Cancel this pending claim? It will be withdrawn and can no longer be approved.",{okLabel:"Cancel claim",cancelLabel:"Keep claim",title:"Cancel claim",danger:true}))return;
-  if(c.hasReceipt){try{await window.storage.delete("p2:claimrcpt:"+id,true);}catch(e){}}
+  if(!await uiConfirm("Cancel this pending claim? It will be withdrawn and can no longer be approved."+(c.receiptDocId?"\n\nThe receipt photo stays filed in Documents → Receipts as Accounting's backup.":""),{okLabel:"Cancel claim",cancelLabel:"Keep claim",title:"Cancel claim",danger:true}))return;
+  /* Legacy inline copies are removed; receipts filed as Documents are kept on
+     purpose — the accounting backup outlives the request. */
+  if(c.hasReceipt&&!c.receiptDocId){try{await window.storage.delete("p2:claimrcpt:"+id,true);}catch(e){}}
   DB.claims=DB.claims.filter(x=>x.id!==id);await saveKey(K.claims,DB.claims);
   await logAudit("delete","claim",c.type,"Cancelled by requester");buildNav();viewClaims();
 }
@@ -6612,6 +6665,8 @@ function viewLiquidations(tabBar){
       <td>${liqReconTag(rc.status)}</td>
       <td>${liqWfTag(l.status)}</td>
       <td><div class="rowact">
+        ${(()=>{const n=(l.rows||[]).filter(r=>r.docId).length;const tot=(l.rows||[]).length;
+          return n?`<button class="icobtn" data-rliq="${l.id}" title="${n} of ${tot} item(s) have a receipt photo on file">Receipts ${n}/${tot}</button>`:"";})()}
         <button class="icobtn" data-pliq="${l.id}">Print</button>
         ${(canAppr&&l.status==="Submitted")?`<button class="icobtn go" data-revliq="${l.id}">Review</button>`:""}
         ${(canAppr&&l.status==="Reviewed")?`<button class="icobtn go" data-appliq="${l.id}">Approve</button>`:""}
@@ -6628,6 +6683,7 @@ function viewLiquidations(tabBar){
     ${rows}</tbody></table></div>`:'<div class="empty">No liquidations yet. Click “+ New liquidation” to record petty cash spending and reconcile it.</div>'}</div>`;
   document.getElementById("newLiq").onclick=()=>liqForm();
   V().querySelectorAll("[data-pliq]").forEach(b=>b.onclick=()=>printLiquidation(b.dataset.pliq));
+  V().querySelectorAll("[data-rliq]").forEach(b=>b.onclick=()=>viewLiqReceipts(b.dataset.rliq));
   V().querySelectorAll("[data-revliq]").forEach(b=>b.onclick=()=>reviewLiquidation(b.dataset.revliq));
   V().querySelectorAll("[data-appliq]").forEach(b=>b.onclick=()=>approveLiquidation(b.dataset.appliq));
   V().querySelectorAll("[data-rejliq]").forEach(b=>b.onclick=()=>rejectLiquidation(b.dataset.rejliq));
@@ -6644,6 +6700,13 @@ function _liqRowCard(r,i){
       <div class="fg"><label>Category</label><select data-f="category">${cats.map(c=>`<option ${r.category===c?"selected":""}>${esc(c)}</option>`).join("")}</select></div></div>
     <div class="fg"><label>Description / particulars</label><input data-f="desc" value="${esc(r.desc||"")}" placeholder="What was bought / paid for"></div>
     <div class="fg"><label>Amount (PHP)</label><input type="number" data-f="amount" min="0" step="0.01" value="${r.amount||0}" style="text-align:right"></div>
+    <div class="fg" style="margin-bottom:0"><label>Photo of this receipt (proof of the original O.R.)</label>
+      ${r._photo
+        ? `<div style="display:flex;align-items:center;gap:10px"><img src="${r._photo}" alt="Receipt preview" style="width:74px;height:74px;object-fit:cover;border-radius:7px;border:1px solid var(--line)"><div><div style="font-size:12px;font-weight:700;color:#1b8f50">✓ Photo attached</div><button type="button" class="icobtn del" data-rmphoto="${i}" style="margin-top:4px">Remove photo</button></div></div>`
+        : (r.docId
+          ? `<div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap"><span style="font-size:12px;font-weight:700;color:#1b8f50">✓ Receipt on file in Documents</span><input type="file" accept="image/*" data-photo="${i}" style="max-width:210px"><span style="font-size:11px;color:var(--muted)">choose a file to replace it</span></div>`
+          : `<input type="file" accept="image/*" data-photo="${i}"><div style="font-size:11px;color:var(--muted);margin-top:3px">Attach the actual O.R. photo — it is filed to Documents → ${RECEIPT_CAT} for Accounting.</div>`)}
+    </div>
   </div>`;
 }
 function _liqRecalc(){
@@ -6671,6 +6734,17 @@ function _liqWireRows(){
     });
     const del=card.querySelector("[data-delrow]");
     if(del)del.onclick=()=>{_liqRows.splice(i,1);_liqWireRows();_liqRecalc();};
+    /* Per-item receipt photo: compressed in the browser, held on the row until
+       the liquidation is saved, then filed into Documents. */
+    const pf=card.querySelector("[data-photo]");
+    if(pf)pf.onchange=async(e)=>{
+      const f=(e.target.files||[])[0];if(!f)return;
+      const d=await svCompressP(f);
+      if(!d){alert("That image could not be read. Try another photo.");return;}
+      _liqRows[i]._photo=d;_liqWireRows();
+    };
+    const rm=card.querySelector("[data-rmphoto]");
+    if(rm)rm.onclick=()=>{delete _liqRows[i]._photo;_liqWireRows();};
   });
 }
 function liqForm(id){
@@ -6699,12 +6773,24 @@ function liqForm(id){
       if(!valid.length){alert("Add at least one expense item with an amount.");return;}
       const fund=+gv("f_lfund")||0;
       const cc=gv("f_lcash");
+      /* File each newly attached O.R. photo into Documents → Receipts, keeping
+         only the returned document id on the row (one stored copy, two views). */
+      let filed=0;
+      for(let i=0;i<_liqRows.length;i++){
+        const r=_liqRows[i];
+        if(!r._photo)continue;
+        const id2=await fileReceiptDoc(r._photo,
+          `Receipt — ${refNo} item ${i+1} — ${(r.orNo||"no OR no").trim()} — ${(r.supplier||r.category||"").trim()}.jpg`,
+          `${refNo} · ${cust}${gv("f_ldept").trim()?" · "+gv("f_ldept").trim():""}`);
+        if(id2){r.docId=id2;delete r._photo;filed++;}
+      }
       const d={refNo,date:gv("f_ldate"),custodian:cust,dept:gv("f_ldept").trim(),fundAmount:fund,
-        rows:_liqRows.map(r=>({date:r.date||"",orNo:(r.orNo||"").trim(),supplier:(r.supplier||"").trim(),desc:(r.desc||"").trim(),category:r.category||"Other",amount:+r.amount||0})),
+        rows:_liqRows.map(r=>({date:r.date||"",orNo:(r.orNo||"").trim(),supplier:(r.supplier||"").trim(),desc:(r.desc||"").trim(),category:r.category||"Other",amount:+r.amount||0,docId:r.docId||""})),
         cashCounted:cc===""?"":(+cc||0)};
-      if(editing){Object.assign(editing,d);await logAudit("update","liquidation",refNo,`${peso(liqTotal(editing))} · ${cust}`);}
-      else{const l={id:uid(),...d,status:"Submitted",preparedBy:user.name,preparedById:user.id,preparedAt:new Date().toISOString(),reviewedBy:"",reviewedById:"",reviewedAt:"",approvedBy:"",approvedAt:"",expenseIds:[]};DB.liquidations.unshift(l);await logAudit("submit","liquidation",refNo,`${peso(liqTotal(l))} · ${cust} · pending review`);}
-      await saveKey(K.liq,DB.liquidations);closeModal();viewClaims();}]]);
+      if(editing){Object.assign(editing,d);await logAudit("update","liquidation",refNo,`${peso(liqTotal(editing))} · ${cust}${filed?` · ${filed} receipt(s) filed`:""}`);}
+      else{const l={id:uid(),...d,status:"Submitted",preparedBy:user.name,preparedById:user.id,preparedAt:new Date().toISOString(),reviewedBy:"",reviewedById:"",reviewedAt:"",approvedBy:"",approvedAt:"",expenseIds:[]};DB.liquidations.unshift(l);await logAudit("submit","liquidation",refNo,`${peso(liqTotal(l))} · ${cust} · pending review${filed?` · ${filed} receipt(s) filed to Documents`:""}`);}
+      await saveKey(K.liq,DB.liquidations);closeModal();viewClaims();
+      toast(filed?`Saved — ${filed} receipt photo(s) filed in Documents`:"Saved","ok");}]]);
   _liqWireRows();_liqRecalc();
   document.getElementById("liqAddRow").onclick=()=>{_liqRows.push({date:todayStr(),orNo:"",supplier:"",desc:"",category:(DB.exptypes&&DB.exptypes[0])||"Other",amount:0});_liqWireRows();_liqRecalc();};
   const fundInp=document.getElementById("f_lfund");if(fundInp)fundInp.oninput=_liqRecalc;
@@ -6749,7 +6835,7 @@ async function delLiquidation(id){
 function printLiquidation(id){
   const l=DB.liquidations.find(x=>x.id===id);if(!l)return;
   const rc=liqRecon(l);
-  const rowsHtml=(l.rows||[]).map((r,i)=>`<tr><td style="text-align:center">${i+1}</td><td>${esc(r.date||"")}</td><td>${esc(r.orNo||"—")}</td><td>${esc(r.supplier||"—")}</td><td>${esc(r.desc||"")}</td><td>${esc(r.category||"")}</td><td style="text-align:right">${pPlain(r.amount)}</td></tr>`).join("");
+  const rowsHtml=(l.rows||[]).map((r,i)=>`<tr><td style="text-align:center">${i+1}</td><td>${esc(r.date||"")}</td><td>${esc(r.orNo||"—")}${r.docId?' <span style="color:#1a7f37;font-size:9px">✓ photo</span>':""}</td><td>${esc(r.supplier||"—")}</td><td>${esc(r.desc||"")}</td><td>${esc(r.category||"")}</td><td style="text-align:right">${pPlain(r.amount)}</td></tr>`).join("");
   const sign=(nm,role,at)=>`<div style="flex:1"><div style="font-weight:700;min-height:24px">${esc(nm||"")}</div><div style="border-top:1px solid #333;padding-top:6px;font-size:12px">${role}${at?` <span style="color:#1a7f37">(${esc(at.slice(0,10))})</span>`:""}</div></div>`;
   printDoc("Petty Cash Liquidation — "+l.refNo,`<div class="page"><div class="page-inner">${printHeader("PETTY CASH LIQUIDATION")}
     <div class="kv"><div class="r"><span>Liquidation Ref No.</span><span>:</span><span class="v brand">${esc(l.refNo)}</span></div>
