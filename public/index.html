@@ -6946,7 +6946,7 @@ function pregRegisterView(){
     tds+=`<td style="padding:3px 6px;border-bottom:1px solid #f2f0f7">${ed?`<div class="rowact"><button class="icobtn" onclick="pregRowForm('${r.id}')">Edit</button><button class="icobtn del" onclick="pregDelRow('${r.id}')">Del</button></div>`:''}</td>`;
     return `<tr>${tds}</tr>`;}).join('');
   let totCells='<td></td>';COLS.forEach((c,i)=>{if(i===0){totCells+='<td colspan="4" style="text-align:right;padding:6px 9px;font-weight:800">TOTALS</td>';return;}if(i<4)return;totCells+=(c.m?`<td style="text-align:right;padding:6px 9px;font-weight:800">${pmoney(tot[c.k])}</td>`:'<td></td>');});totCells+='<td></td>';
-  return `<div class="panel"><div class="panel-head"><div><h3>Payroll Register</h3><div class="panel-sub">One row per employee per deployment day. Enter time in/out, approvals &amp; deductions — hours, the earnings breakdown, Total Earnings, Total Deductions and Net Pay compute automatically from the position rate.</div></div><div class="tools">${ed?'<button class="btn btn-primary" onclick="pregRowForm()">+ Add row</button>':''}</div></div>
+  return `<div class="panel"><div class="panel-head"><div><h3>Payroll Register</h3><div class="panel-sub">One row per employee per deployment day. Enter time in/out, approvals &amp; deductions — hours, the earnings breakdown, Total Earnings, Total Deductions and Net Pay compute automatically from the position rate.</div></div><div class="tools">${ed?'<button class="btn btn-light" onclick="pregImportAttendance()" title="Pull every clocked attendance record into the register">↥ Import from attendance</button> <button class="btn btn-primary" onclick="pregRowForm()">+ Add row</button>':''}</div></div>
    <div style="overflow:auto;max-height:62vh;border:1px solid #eee;border-radius:8px"><table style="font-size:11px;border-collapse:collapse;white-space:nowrap"><thead><tr>${gh}</tr><tr>${chh}</tr></thead><tbody>${rows.length?body+`<tr style="background:#faf9fd">${totCells}</tr>`:`<tr><td colspan="${COLS.length+2}" style="padding:12px;color:var(--muted)">No rows yet. Click “+ Add row”.</td></tr>`}</tbody></table></div>
    <div style="font-size:11px;color:var(--muted);margin-top:6px">Click <b>Date</b> to sort · tick the boxes to select rows · each row's Edit &amp; Delete are in the <b>⋮</b> menu.</div></div>`;
 }
@@ -7029,6 +7029,64 @@ function pregRowForm(id){
   ["pr_tin","pr_tout","pr_break","pr_ndcomp","pr_aot","pr_cash","pr_othamt"].forEach(idf=>{const e=document.getElementById(idf);if(e)e.oninput=upd;});
   ["pr_otrate","pr_dphil","pr_dsss","pr_dpag","pr_dhdmf","pr_doth","pr_date"].forEach(idf=>{const e=document.getElementById(idf);if(e)e.onchange=upd;});
   upd();
+}
+/* ===== Attendance → Payroll Register bulk import =====
+   Every clocked day becomes one register row (name, site, position, time in/out,
+   rate reference) so nothing an employee punched can be missed at payroll time.
+   Already-imported days are detected by employee+date and never duplicated. */
+function pregAttCandidates(from,to){
+  const NOWORK=["Absent","AWOL","Leave Without Pay"];
+  const have=new Set((DB.payregister||[]).map(r=>((r.name||"").trim().toLowerCase())+"|"+(r.date||"")));
+  const out={ready:[],noOut:[],nonWork:[],already:[]};
+  (DB.attendance||[]).forEach(a=>{
+    if(!a.date||a.date<from||a.date>to)return;
+    const key=((a.empName||"").trim().toLowerCase())+"|"+a.date;
+    if(have.has(key)){out.already.push(a);return;}
+    if(NOWORK.includes(a.status)){out.nonWork.push(a);return;}
+    if(!a.timeIn||!a.timeOut){out.noOut.push(a);return;}
+    out.ready.push(a);
+  });
+  return out;
+}
+function pregImportAttendance(){
+  if(!can("payroll.edit"))return;
+  const t=todayStr();
+  const from=t.slice(0,8)+"01", to=t;
+  const render=(f,tt)=>{
+    const c=pregAttCandidates(f,tt);
+    const li=(arr,label,cls)=>arr.length?`<div style="margin-top:6px"><b style="color:${cls}">${arr.length}</b> ${label}<div style="font-size:11.5px;color:var(--muted);max-height:90px;overflow:auto;line-height:1.7">${arr.slice(0,12).map(a=>esc(a.date+" · "+a.empName+(a.status&&a.status!=="Present"?" ("+a.status+")":""))).join("<br>")}${arr.length>12?"<br>…and "+(arr.length-12)+" more":""}</div></div>`:"";
+    return `<div class="notice" style="margin-bottom:10px">Each clocked day becomes one register row — employee, site, position, time in/out and the daily-rate reference. Hours, earnings and deductions then compute automatically. Days already in the register are skipped.</div>
+     ${li(c.ready,"ready to import","#1b8f50")}
+     ${li(c.noOut,"skipped — no time out yet (complete the punch in Attendance first)","#b97b12")}
+     ${li(c.nonWork,"skipped — non-working status (Absent / AWOL / LWOP)","#6f6c85")}
+     ${li(c.already,"already in the register","#6f6c85")}
+     ${(!c.ready.length&&!c.noOut.length&&!c.nonWork.length&&!c.already.length)?'<div style="color:var(--muted);font-size:12.5px">No attendance records in this date range.</div>':""}`;
+  };
+  openModal("Import attendance into the register",`
+   <div class="grid2"><div class="fg"><label>From</label><input id="pia_from" type="date" value="${from}"></div>
+    <div class="fg"><label>To</label><input id="pia_to" type="date" value="${to}"></div></div>
+   <div id="pia_body">${render(from,to)}</div>`,
+   [["Cancel","btn-out",closeModal],["Import","btn-primary",async()=>{
+     const f=gv("pia_from"),tt=gv("pia_to");
+     const c=pregAttCandidates(f,tt);
+     if(!c.ready.length){toast("Nothing to import in that range","error");return;}
+     DB.payregister=await loadKey(K.preg,DB.payregister);   /* refresh-before-write (shared array) */
+     c.ready.forEach(a=>{
+       const emp=(DB.employees||[]).find(e=>e.id===a.empId)||(DB.employees||[]).find(e=>(e.name||"").toLowerCase()===(a.empName||"").toLowerCase());
+       const dr=emp?((typeof empDailyRate==="function")?empDailyRate(emp):Math.round((+emp.basic||0)/26)):0;
+       DB.payregister.push({id:uid(),date:a.date,site:a.projectName||"",deployArea:"",name:a.empName||"",
+         position:emp?(emp.position||emp.role||""):"",timeIn:pregTo24(a.timeIn),timeOut:pregTo24(a.timeOut),
+         shift:(pregTo24(a.timeIn)>="14:00")?"PM":"AM",breakHrs:1,ndComp:0,ndFlag:false,restDay:false,
+         approvedBy:"",approvedOt:(+a.ot||0)||"",otRate:(+a.ot>0)?"reg":"",cashAdvance:"",
+         dPhil:false,dSss:false,dPagibig:false,dHdmf:false,dOthers:false,othersAmt:"",
+         refDaily:dr||"",refBasic:dr||"",refTitle:"",src:"attendance",attId:a.id});
+     });
+     await saveKey(K.preg,DB.payregister);
+     await logAudit("create","payroll register","attendance import",c.ready.length+" row(s) from "+f+" to "+tt);
+     closeModal();toast(c.ready.length+" attendance day(s) imported into the register","ok");viewPayReg();
+   }]]);
+  const re=()=>{const b=document.getElementById("pia_body");if(b)b.innerHTML=render(gv("pia_from"),gv("pia_to"));};
+  ["pia_from","pia_to"].forEach(i=>{const e=document.getElementById(i);if(e)e.onchange=re;});
 }
 async function pregDelRow(id){if(!can("payroll.edit"))return;const r=(DB.payregister||[]).find(x=>x.id===id);if(!r)return;if(!await uiConfirm("Delete this register row?"))return;DB.payregister=DB.payregister.filter(x=>x.id!==id);await saveKey(K.preg,DB.payregister);await logAudit("delete","payroll register",r.name||"","row");viewPayReg();}
 function pregSummaryView(){
