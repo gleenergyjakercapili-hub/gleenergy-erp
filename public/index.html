@@ -1554,6 +1554,24 @@ async function init(){
      and without it their days never reach the payroll register. View only;
      editing other people's records stays with HR/Ops/PM/Admin. */
   if(!DB.rbac._attAllStaff){["Purchaser","Accountant"].forEach(r=>{if(DB.rbac[r])DB.rbac[r]["attendance.view"]=true;});DB.rbac._attAllStaff=true;await saveKey(K.rbac,DB.rbac);}
+  /* One-time: claims submitted before receipts were auto-filed kept their photo
+     in a private per-claim key, so Accounting's Documents shelf had a gap. Move
+     each one onto the Documents shelf (same single stored copy) and drop the
+     old key only after the new one is confirmed written. */
+  if(!DB.rbac._rcptToDocs){
+    const legacy=(DB.claims||[]).filter(c=>c.hasReceipt&&!c.receiptDocId);
+    let moved=0;
+    for(const c of legacy){
+      let img="";try{const r=await window.storage.get("p2:claimrcpt:"+c.id,true);img=(r&&r.value)||"";}catch(e){}
+      if(!img)continue;
+      const docId=await fileReceiptDoc(img,
+        `Receipt — ${c.type||"Claim"} ${(c.id||"").slice(0,8).toUpperCase()} — ${c.requestedBy||""} — ${c.date||""}.jpg`,
+        `${c.type||""} · ${c.category||""}${c.ref?" · "+c.ref:""}`);
+      if(docId){c.receiptDocId=docId;moved++;try{await window.storage.delete("p2:claimrcpt:"+c.id,true);}catch(e){}}
+    }
+    if(moved)await saveKey(K.claims,DB.claims);
+    DB.rbac._rcptToDocs=true;await saveKey(K.rbac,DB.rbac);
+  }
   if(!DB.rbac._opsMgr){if(!DB.rbac["Operations Manager"])DB.rbac["Operations Manager"]=defaultRbac()["Operations Manager"]||{};DB.rbac._opsMgr=true;await saveKey(K.rbac,DB.rbac);}
   if(!DB.rbac._docsAll){Object.keys(DB.rbac).forEach(role=>{if(role[0]==="_")return;if(DB.rbac[role]&&typeof DB.rbac[role]==="object")DB.rbac[role]["documents.view"]=true;});DB.rbac._docsAll=true;await saveKey(K.rbac,DB.rbac);}
   // seed a demo proposal + enrollment once
@@ -1915,6 +1933,8 @@ function purchNavCount(){
 function claimsNavCount(){
   if(typeof user==="undefined"||!user)return 0;
   let n=DB.liquidations.filter(l=>l.preparedById===user.id&&l.status==="Rejected").length;
+  /* Finance asked this person for a receipt — badge it until they attach one. */
+  n+=DB.claims.filter(c=>c.requestedById===user.id&&c.status==="Pending"&&c.receiptRequested&&!(c.hasReceipt||c.receiptDocId||c.noReceipt)).length;
   if(can("claims.approve")){
     n+=DB.claims.filter(c=>c.status==="Pending").length;
     n+=DB.liquidations.filter(l=>l.status==="Submitted"||l.status==="Reviewed").length;
@@ -6465,20 +6485,24 @@ function viewClaims(){
     <div class="dx-tile dx-t3"><div class="tg">₱</div><div class="tl">Approved (posted to books)</div><div class="tv" style="font-size:22px">${peso(approvedTot)}</div></div>
     <div class="dx-tile dx-t4"><div class="tg">✓</div><div class="tl">Approved count</div><div class="tv">${DB.claims.filter(c=>c.status==="Approved").length}</div></div></div>`;
   V().innerHTML=tabBar+tiles+`
+   ${(()=>{const asked=mine.filter(c=>c.receiptRequested&&!claimHasProof(c)&&c.status==="Pending");
+     return asked.length?`<div class="notice" style="border-color:var(--red);background:#fdeaea"><b>Finance is waiting for ${asked.length===1?"a receipt":"receipts"}.</b> Use the <b>+ Receipt</b> button on ${asked.length===1?"this claim":"these claims"} to attach the photo — or declare that no official receipt exists.<div style="font-size:11.5px;color:var(--muted);margin-top:4px">${asked.map(c=>esc(`${c.date} · ${c.desc||c.category} · ${peso(c.amount)}`)).join("<br>")}</div></div>`:"";})()}
    ${(canAppr&&pend)?`<div class="notice" style="border-color:#e0b400;background:#fffbe8">${pend} claim(s) awaiting your approval as Finance. Approving posts the amount as a company expense.</div>`:''}
    <div class="panel"><div class="panel-head"><h3>Petty Cash & Reimbursement${canAppr?'<span style="font-weight:500;color:var(--muted);font-size:12px"> · all staff</span>':'<span style="font-weight:500;color:var(--muted);font-size:12px"> · my requests</span>'}</h3>
      <div class="tools">${canMng?'<button class="btn btn-light" id="mngTypes">Manage expense types</button>':''}<button class="btn btn-primary" id="newClaim">+ New petty cash / reimbursement</button></div></div>
    ${list.length?`<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Type</th>${canAppr?"<th>Requested by</th>":""}<th>Category</th><th>Description</th><th style="text-align:right">Amount</th><th>Status</th><th></th></tr></thead><tbody>
    ${list.slice().sort((a,b)=>(b.date||"").localeCompare(a.date||"")).map(c=>`<tr>
      <td>${esc(c.date)}</td><td>${esc(c.type)}</td>${canAppr?`<td>${esc(c.requestedBy)}<div style="font-size:10px;color:var(--muted)">${esc(c.role||"")}</div></td>`:""}
-     <td>${esc(c.category)}</td><td>${esc(c.desc||"")}${c.noReceipt?`<div style="font-size:10px;color:var(--warn);font-weight:700">⚠ No O.R. — ${esc(c.noReceiptReason||"")}</div>`:""}</td><td style="text-align:right"><b>${peso(c.amount)}</b></td>
+     <td>${esc(c.category)}</td><td>${esc(c.desc||"")}${c.noReceipt?`<div style="font-size:10px;color:var(--warn);font-weight:700">⚠ No O.R. — ${esc(c.noReceiptReason||"")}</div>`:""}${(c.receiptRequested&&!claimHasProof(c))?`<div style="font-size:10px;color:var(--red);font-weight:700">📎 Receipt requested${c.receiptRequestedBy?" by "+esc(c.receiptRequestedBy):""}</div>`:""}</td><td style="text-align:right"><b>${peso(c.amount)}</b></td>
      <td>${claimTag(c.status)}${c.decidedBy?`<div style="font-size:10px;color:var(--muted)">${c.status==="Rejected"?"rejected":"approved"} by ${esc(c.decidedBy)}${c.decidedAt?" · "+esc(c.decidedAt.slice(0,10)):""}</div>`:""}</td>
-     <td><div class="rowact"><button class="icobtn" data-pclaim="${c.id}">Print</button>${(c.hasReceipt||c.receiptDocId)?`<button class="icobtn" data-rcpt="${c.id}">Receipt</button>`:(c.noReceipt?`<button class="icobtn" data-rcpt="${c.id}" title="No official receipt — see declared reason">No O.R.</button>`:"")}${(canAppr&&c.status==="Pending")?`<button class="icobtn go" data-aclaim="${c.id}">Approve</button><button class="icobtn del" data-rclaim="${c.id}">Reject</button>`:""}${(c.status==="Pending"&&c.requestedById===user.id)?`<button class="icobtn del" data-dclaim="${c.id}">Cancel</button>`:""}</div></td></tr>`).join("")}
+     <td><div class="rowact"><button class="icobtn" data-pclaim="${c.id}">Print</button>${(c.hasReceipt||c.receiptDocId)?`<button class="icobtn" data-rcpt="${c.id}">Receipt</button>`:(c.noReceipt?`<button class="icobtn" data-rcpt="${c.id}" title="No official receipt — see declared reason">No O.R.</button>`:"")}${(c.status==="Pending"&&!claimHasProof(c)&&(c.requestedById===user.id||canAppr))?`<button class="icobtn go" data-attrcpt="${c.id}" title="Attach the receipt photo to this claim">+ Receipt</button>`:""}${(canAppr&&c.status==="Pending"&&!claimHasProof(c)&&!c.receiptRequested)?`<button class="icobtn" data-reqrcpt="${c.id}" title="Ask the requester to attach the receipt">Ask for receipt</button>`:""}${(canAppr&&c.status==="Pending")?`<button class="icobtn go" data-aclaim="${c.id}">Approve</button><button class="icobtn del" data-rclaim="${c.id}">Reject</button>`:""}${(c.status==="Pending"&&c.requestedById===user.id)?`<button class="icobtn del" data-dclaim="${c.id}">Cancel</button>`:""}</div></td></tr>`).join("")}
    </tbody></table></div>`:'<div class="empty">No claims yet. Click “+ New petty cash / reimbursement” to submit one.</div>'}</div>`;
   document.getElementById("newClaim").onclick=()=>claimForm();
   if(canMng){const mt=document.getElementById("mngTypes");if(mt)mt.onclick=manageExpTypes;}
   V().querySelectorAll("[data-pclaim]").forEach(b=>b.onclick=()=>printClaim(b.dataset.pclaim));
   V().querySelectorAll("[data-rcpt]").forEach(b=>b.onclick=()=>viewClaimReceipt(b.dataset.rcpt));
+  V().querySelectorAll("[data-attrcpt]").forEach(b=>b.onclick=()=>claimAttachReceipt(b.dataset.attrcpt));
+  V().querySelectorAll("[data-reqrcpt]").forEach(b=>b.onclick=()=>requestClaimReceipt(b.dataset.reqrcpt));
   V().querySelectorAll("[data-aclaim]").forEach(b=>b.onclick=()=>approveClaim(b.dataset.aclaim));
   V().querySelectorAll("[data-rclaim]").forEach(b=>b.onclick=()=>rejectClaim(b.dataset.rclaim));
   V().querySelectorAll("[data-dclaim]").forEach(b=>b.onclick=()=>cancelClaim(b.dataset.dclaim));
@@ -6613,6 +6637,62 @@ async function cancelClaim(id){
   if(c.hasReceipt&&!c.receiptDocId){try{await window.storage.delete("p2:claimrcpt:"+id,true);}catch(e){}}
   DB.claims=DB.claims.filter(x=>x.id!==id);await saveKey(K.claims,DB.claims);
   await logAudit("delete","claim",c.type,"Cancelled by requester");buildNav();viewClaims();
+}
+/* Proof can be supplied AFTER submission — a claim that arrived without a
+   receipt (or before receipts were mandatory) no longer has to be cancelled
+   and re-typed. Same rules as the submit form: photo, or a written reason. */
+function claimHasProof(c){return !!(c&&(c.hasReceipt||c.receiptDocId||c.noReceipt));}
+function claimAttachReceipt(id){
+  const c=DB.claims.find(x=>x.id===id);if(!c)return;
+  const own=c.requestedById===user.id;
+  if(!own&&!can("claims.approve")){alert("Only the requester or Finance can attach the receipt.");return;}
+  if(c.status!=="Pending"){alert("This claim has already been decided — its receipt can no longer be changed.");return;}
+  openModal("Attach receipt — "+esc(c.type),`
+   <div class="kv" style="margin-bottom:10px"><div class="r"><span>Claim</span><span>:</span><span class="v">${esc(c.desc||"")}</span></div>
+    <div class="r"><span>Amount</span><span>:</span><span class="v brand">${peso(c.amount)}</span></div>
+    <div class="r"><span>Requested by</span><span>:</span><span class="v">${esc(c.requestedBy)}</span></div></div>
+   <div class="fg"><label>Photo of receipt <span style="color:var(--red)">*</span></label><input id="f_arcpt" type="file" accept="image/*">
+     <div style="font-size:11px;color:var(--muted);margin-top:3px">Filed to Documents → ${RECEIPT_CAT} for Accounting.</div></div>
+   <div class="fg"><label style="display:flex;align-items:center;gap:7px;font-weight:500;font-size:12.5px;cursor:pointer"><input type="checkbox" id="f_anorcpt" style="width:auto"> No official receipt available</label>
+     <div id="f_anorcptbox" style="display:none;margin-top:6px"><input id="f_anoreason" placeholder="Why there is no O.R. — required" value="${esc(c.noReceiptReason||"")}">
+       <div style="font-size:11px;color:var(--warn);margin-top:3px">Recorded as a declaration and shown to Finance.</div></div></div>`,
+   [["Cancel","btn-out",closeModal],["Save receipt","btn-primary",async()=>{
+     const fi=document.getElementById("f_arcpt");
+     const noR=!!(document.getElementById("f_anorcpt")||{}).checked;
+     const reason=gv("f_anoreason").trim();
+     let data="";
+     if(fi&&fi.files&&fi.files[0]){
+       data=await svCompressP(fi.files[0]);
+       if(!data){alert("That image could not be read. Please attach a different photo.");return;}
+     }else if(noR){
+       if(!reason){alert("Please state why there is no official receipt.");return;}
+     }else{alert("Attach a photo of the receipt, or tick “No official receipt available” and give the reason.");return;}
+     DB.claims=await loadKey(K.claims,DB.claims);   /* refresh-before-write (shared array) */
+     const live=DB.claims.find(x=>x.id===id)||c;
+     if(data){
+       live.receiptDocId=await fileReceiptDoc(data,
+         `Receipt — ${live.type} ${(live.id||"").slice(0,8).toUpperCase()} — ${live.requestedBy} — ${live.date}.jpg`,
+         `${live.type} · ${live.category}${live.ref?" · "+live.ref:""}`);
+       live.hasReceipt=true;live.noReceipt=false;live.noReceiptReason="";
+     }else{live.noReceipt=true;live.noReceiptReason=reason;}
+     live.receiptRequested=false;
+     await saveKey(K.claims,DB.claims);
+     await logAudit("update","claim",live.type,`Receipt ${data?"attached":"declared unavailable"} after submission by ${user.name}`);
+     closeModal();buildNav();viewClaims();
+     toast(data?"Receipt attached and filed in Documents":"No-receipt declaration recorded","ok");}]]);
+  {const nr=document.getElementById("f_anorcpt"),bx=document.getElementById("f_anorcptbox"),fl=document.getElementById("f_arcpt");
+   if(nr)nr.onchange=()=>{bx.style.display=nr.checked?"":"none";if(nr.checked&&fl)fl.value="";if(fl)fl.disabled=nr.checked;};}
+}
+async function requestClaimReceipt(id){
+  if(!can("claims.approve")){alert("Only Finance can request a receipt.");return;}
+  const c=DB.claims.find(x=>x.id===id);if(!c)return;
+  if(!await uiConfirm(`Ask ${c.requestedBy} to attach the receipt for this ${c.type.toLowerCase()} (${peso(c.amount)})?\n\nThey will see it flagged on their Petty Cash & Claims page.`,{okLabel:"Request receipt",title:"Request receipt"}))return;
+  DB.claims=await loadKey(K.claims,DB.claims);
+  const live=DB.claims.find(x=>x.id===id)||c;
+  live.receiptRequested=true;live.receiptRequestedBy=user.name;live.receiptRequestedAt=new Date().toISOString();
+  await saveKey(K.claims,DB.claims);
+  await logAudit("update","claim",live.type,`Receipt requested from ${live.requestedBy} by ${user.name}`);
+  buildNav();viewClaims();toast("Receipt requested — "+live.requestedBy+" will see it on their claims page","ok");
 }
 function printClaim(id){
   const c=DB.claims.find(x=>x.id===id);if(!c)return;
