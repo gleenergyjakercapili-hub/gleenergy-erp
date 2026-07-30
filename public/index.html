@@ -1505,6 +1505,10 @@ async function init(){
   DB.purchaserequests=await loadKey(K.pr,[]);
   DB.surveys=await loadKey(K.surveys,[]);
   DB.exptypes=await loadKey(K.exptypes,null)||(await saveKey(K.exptypes,seedExpTypes()),seedExpTypes());
+  /* Project Report rollout: the OM's workbook tracks Toll and Lalamove as their
+     own cost columns, so they must exist as taggable expense types. One-time
+     (flag on rbac) so a deliberate later removal stays removed. */
+  if(!DB.rbac._expToll){["Toll","Lalamove"].forEach(t=>{if(!DB.exptypes.includes(t))DB.exptypes.push(t);});DB.rbac._expToll=true;await saveKey(K.exptypes,DB.exptypes);await saveKey(K.rbac,DB.rbac);}
   let _chg=false; DB.employees.forEach(e=>{if(e.basic===undefined){e.basic=roleBasic(e.role);_chg=true;} if(e.payFreq===undefined){e.payFreq=WEEKLY_ROLES.includes(e.role)?"Weekly":"Semi-monthly";_chg=true;}
     /* Labor is paid weekly by definition. Payroll runs select employees by pay frequency,
        so a labor row left on Semi-monthly would fall into the wrong run. */
@@ -4326,7 +4330,7 @@ function projClient(p){return DB.clients.find(c=>c.id===p.clientId)||DB.clients.
    falling back to the client's own phone. */
 function projContactStr(cl){if(!cl)return "";return cl.contactPerson?(cl.contactPerson+((cl.contactPhone||cl.phone)?" · "+(cl.contactPhone||cl.phone):"")):(cl.phone||"");}
 function projTabSegHTML(){
-  return `<div class="segbar" style="margin-bottom:12px">${[["pipeline","Pipeline"],["info","Information sheet"]].map(t=>`<button class="${projTab===t[0]?'on':''}" onclick="projTab='${t[0]}';viewProjects()">${t[1]}</button>`).join("")}</div>`;
+  return `<div class="segbar" style="margin-bottom:12px">${[["pipeline","Pipeline"],["info","Information sheet"],["report","Project report"]].map(t=>`<button class="${projTab===t[0]?'on':''}" onclick="projTab='${t[0]}';viewProjects()">${t[1]}</button>`).join("")}</div>`;
 }
 function projInfoView(){
   const ed=can("projects.edit");
@@ -4414,8 +4418,63 @@ function printProjInfo(list){
    <div style="margin-top:40px;display:flex;gap:40px"><div style="flex:1;border-top:1px solid #333;padding-top:5px;font-size:11px;text-align:center">Prepared by (Operations)</div><div style="flex:1;border-top:1px solid #333;padding-top:5px;font-size:11px;text-align:center">Noted by</div></div>
    <div style="margin-top:auto;font-size:10px;color:#888;padding:5mm 0 2mm">Generated ${new Date().toLocaleString()}</div></div></div>`);
 }
+/* ===== PROJECT REPORT — row-per-project financials (from the OM's workbook).
+   Every figure is computed live: collections drive Downpayment/Balance, tagged
+   expenses fill each cost column, Gross net = Contract − all project spend. */
+function projReportRow(p){
+  const st=projInfoStatus(p);
+  const exps=(DB.expenses||[]).filter(e=>e.projectId===p.id);
+  const cat=n=>exps.filter(e=>(e.category||"")===n).reduce((s,e)=>s+(+e.amount||0),0);
+  const total=exps.reduce((s,e)=>s+(+e.amount||0),0);
+  const mat=cat("Materials"),fuel=cat("Fuel"),toll=cat("Toll"),lala=cat("Lalamove"),labor=cat("Labor");
+  const r2=v=>Math.round(v*100)/100;   /* keep derived figures clean of float residue */
+  const other=r2(total-mat-fuel-toll-lala-labor);
+  const contract=+p.value||0, collected=projCollected(p.id);
+  const panels=(p.materials||[]).reduce((s,m)=>{const it=(DB.inventory||[]).find(i=>i.id===m.itemId);return s+((it&&/panel/i.test(it.name||""))?(+m.qty||0):0);},0);
+  return {p,st,contract,collected,balance:r2(contract-collected),panels,mat,fuel,toll,lala,labor,other,total,gross:r2(contract-total)};
+}
+function projReportView(){
+  const rows=DB.projects.filter(p=>!p.archived).map(projReportRow);
+  const T=k=>rows.reduce((s,r)=>s+r[k],0);
+  const num=v=>`<td style="text-align:right">${v?pPlain(v):"—"}</td>`;
+  V().innerHTML=`${projTabSegHTML()}
+  <div class="panel"><div style="display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;padding:14px 16px 0">
+    <h3 style="margin:0">Project report</h3><div style="display:flex;gap:8px">
+    <button class="btn btn-light" onclick="printProjReport()">Print</button>
+    <button class="btn btn-light" id="prExpCsv">Export CSV</button></div></div>
+  <div style="padding:10px 16px 16px">
+  <div class="panel-intro">Every figure is computed live from the books — collections drive Downpayment and Balance, expenses tagged to each project fill the cost columns (Materials, Fuel, Toll, Lalamove, Payroll), and Gross net = Contract − all project spend. ${rows.length} project(s) · nothing here is typed by hand.</div>
+  <div class="tbl-scroll"><table><thead><tr><th>Project</th><th>Engr / Sales</th><th>Status</th><th style="text-align:right">Panels</th><th style="text-align:right">Contract</th><th style="text-align:right">Downpayment</th><th style="text-align:right">Balance</th><th style="text-align:right">Materials</th><th style="text-align:right">Fuel</th><th style="text-align:right">Toll</th><th style="text-align:right">Lalamove</th><th style="text-align:right">Payroll</th><th style="text-align:right">Other exp.</th><th style="text-align:right">Gross net</th></tr></thead><tbody>
+  ${rows.length?rows.map(r=>`<tr><td><b>${esc(r.p.clientName||"")}</b><div style="font-size:11px;color:var(--muted)">${esc(r.p.name||"")}</div></td>
+    <td>${esc(r.p.engineer||"—")}${r.p.sales?" / "+esc(r.p.sales):""}</td><td><span class="tag ${r.st.cls}">${r.st.t}</span></td>
+    <td style="text-align:right">${r.panels||"—"}</td><td style="text-align:right">${pPlain(r.contract)}</td>
+    ${num(r.collected)}<td style="text-align:right">${pPlain(r.balance)}</td>
+    ${num(r.mat)}${num(r.fuel)}${num(r.toll)}${num(r.lala)}${num(r.labor)}${num(r.other)}
+    <td style="text-align:right;font-weight:700;color:${r.gross>=0?"var(--ok)":"var(--red)"}">${pPlain(r.gross)}</td></tr>`).join("")
+   :'<tr><td colspan="14" style="text-align:center;color:var(--muted);padding:22px">No projects yet — rows appear automatically as projects are created and expenses are tagged to them.</td></tr>'}
+  </tbody>${rows.length?`<tfoot><tr style="font-weight:700;background:#faf9fd"><td>TOTAL · ${rows.length}</td><td></td><td></td><td style="text-align:right">${T("panels")||""}</td><td style="text-align:right">${pPlain(T("contract"))}</td><td style="text-align:right">${pPlain(T("collected"))}</td><td style="text-align:right">${pPlain(T("balance"))}</td><td style="text-align:right">${pPlain(T("mat"))}</td><td style="text-align:right">${pPlain(T("fuel"))}</td><td style="text-align:right">${pPlain(T("toll"))}</td><td style="text-align:right">${pPlain(T("lala"))}</td><td style="text-align:right">${pPlain(T("labor"))}</td><td style="text-align:right">${pPlain(T("other"))}</td><td style="text-align:right">${pPlain(T("gross"))}</td></tr></tfoot>`:""}</table></div></div></div>`;
+  const b=document.getElementById("prExpCsv");
+  if(b)b.onclick=()=>exportCSV("project-report.csv",
+    ["Project","Client","Engineer","Sales","Status","Panels","Contract","Downpayment","Balance","Materials","Fuel","Toll","Lalamove","Payroll","Other","GrossNet"],
+    rows.map(r=>[r.p.name||"",r.p.clientName||"",r.p.engineer||"",r.p.sales||"",r.st.t,r.panels,r.contract,r.collected,r.balance,r.mat,r.fuel,r.toll,r.lala,r.labor,r.other,r.gross]));
+}
+function printProjReport(){
+  const rows=DB.projects.filter(p=>!p.archived).map(projReportRow);
+  const T=k=>rows.reduce((s,r)=>s+r[k],0);
+  const n=v=>`<td style="text-align:right">${v?pPlain(v):"—"}</td>`;
+  printDoc("Project Report",`<div class="page"><div class="page-inner">${printHeader("PROJECT REPORT")}
+   <div class="kv"><div class="r"><span>As of</span><span>:</span><span class="v brand">${esc(todayStr())}</span></div>
+   <div class="r"><span>Prepared by</span><span>:</span><span class="v">${esc((user&&user.name)||"")}</span></div></div>
+   <table class="pi-tbl" style="margin-top:12px"><colgroup><col style="width:13%"><col style="width:9%"><col style="width:7%">${'<col style="width:7.1%">'.repeat(10)}</colgroup><thead><tr><th>Project</th><th>Engr/Sales</th><th>Status</th><th style="text-align:right">Contract</th><th style="text-align:right">Downpmt</th><th style="text-align:right">Balance</th><th style="text-align:right">Materials</th><th style="text-align:right">Fuel</th><th style="text-align:right">Toll</th><th style="text-align:right">Lalamove</th><th style="text-align:right">Payroll</th><th style="text-align:right">Other</th><th style="text-align:right">Gross net</th></tr></thead><tbody>
+   ${rows.map(r=>`<tr><td><b>${esc(r.p.clientName||"")}</b><br><span style="color:#666">${esc(r.p.name||"")}</span></td><td>${esc(r.p.engineer||"—")}${r.p.sales?" / "+esc(r.p.sales):""}</td><td>${r.st.t}</td><td style="text-align:right">${pPlain(r.contract)}</td>${n(r.collected)}<td style="text-align:right">${pPlain(r.balance)}</td>${n(r.mat)}${n(r.fuel)}${n(r.toll)}${n(r.lala)}${n(r.labor)}${n(r.other)}<td style="text-align:right"><b>${pPlain(r.gross)}</b></td></tr>`).join("")}
+   <tr><td><b>TOTAL</b></td><td></td><td></td><td style="text-align:right"><b>${pPlain(T("contract"))}</b></td><td style="text-align:right"><b>${pPlain(T("collected"))}</b></td><td style="text-align:right"><b>${pPlain(T("balance"))}</b></td><td style="text-align:right"><b>${pPlain(T("mat"))}</b></td><td style="text-align:right"><b>${pPlain(T("fuel"))}</b></td><td style="text-align:right"><b>${pPlain(T("toll"))}</b></td><td style="text-align:right"><b>${pPlain(T("lala"))}</b></td><td style="text-align:right"><b>${pPlain(T("labor"))}</b></td><td style="text-align:right"><b>${pPlain(T("other"))}</b></td><td style="text-align:right"><b>${pPlain(T("gross"))}</b></td></tr>
+   </tbody></table>
+   <div style="margin-top:40px;display:flex;gap:40px"><div style="flex:1;border-top:1px solid #333;padding-top:5px;font-size:11px;text-align:center">Prepared by (Operations)</div><div style="flex:1;border-top:1px solid #333;padding-top:5px;font-size:11px;text-align:center">Noted by</div></div>
+   <div style="margin-top:auto;font-size:10px;color:#888;padding:5mm 0 2mm">Generated ${new Date().toLocaleString()}</div></div></div>`);
+}
 function viewProjects(){
   if(projTab==="info"){projInfoView();return;}
+  if(projTab==="report"){projReportView();return;}
   const stTag=s=>`<span class="tag t-contacted">${esc(s)}</span>`;
   const _pa=DB.projects.filter(p=>!p.archived);const pN=_pa.length,pDone=_pa.filter(p=>p.stage==="Handover").length,pProg=pN-pDone,pVal=_pa.reduce((s,p)=>s+(+p.value||0),0);
   const pTiles=`<div class="dx-tiles" style="margin-bottom:16px">
@@ -6339,7 +6398,7 @@ function expForm(id){
 async function delExp(id){if(!can("records.delete")){alert("Only the GM/CEO can delete records.");return;}const e=DB.expenses.find(x=>x.id===id);if(!e)return;if(!await uiConfirm("Delete this expense?"))return;DB.expenses=DB.expenses.filter(x=>x.id!==id);await saveKey(K.exp,DB.expenses);await logAudit("delete","expense",e.category,"Deleted");viewFinance();}
 
 /* ============ PETTY CASH & CLAIMS ============ */
-function seedExpTypes(){return ["Materials","Labor","Transport","Fuel","Meals & Allowance","Office Supplies","Tools & Consumables","Permits & Gov't Fees","Communication","Site/Project Misc","Overhead","Other"];}
+function seedExpTypes(){return ["Materials","Labor","Transport","Fuel","Toll","Lalamove","Meals & Allowance","Office Supplies","Tools & Consumables","Permits & Gov't Fees","Communication","Site/Project Misc","Overhead","Other"];}
 function claimTag(s){const m={"Pending":"t-lead","Approved":"t-won","Rejected":"t-rejected"};return `<span class="tag ${m[s]||'t-lead'}">${esc(s)}</span>`;}
 function viewClaims(){
   const canAppr=can("claims.approve"), canMng=can("exptypes.manage");
