@@ -229,7 +229,7 @@ UTC = datetime.timezone.utc
 PRESENCE_KEY = "p2:presence"
 FEED_EXCLUDE_KEYS = (PRESENCE_KEY,)                    # rides the reply separately —
                                                        # heartbeats must never set the marker
-FEED_EXCLUDE_PREFIXES = ("p2:notifseen:", "p2:notifdismissed:")
+FEED_EXCLUDE_PREFIXES = ("p2:notifseen:", "p2:notifdismissed:", "p2:chatread:")
 FEED_MAX_KEYS = 1000
 FEED_LOOKBACK = datetime.timedelta(seconds=2)          # absorbs commit-order inversion / NTP steps
 
