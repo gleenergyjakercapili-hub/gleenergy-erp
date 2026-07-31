@@ -45,6 +45,7 @@ import time
 import hmac
 import hashlib
 import secrets
+import datetime
 import smtplib
 import urllib.request
 import urllib.parse
@@ -209,6 +210,90 @@ class SetBody(BaseModel):
 
 class ListBody(BaseModel):
     prefix: str = ""
+
+
+class ChangesBody(BaseModel):
+    since: str = ""        # opaque marker from the previous reply; "" = first call
+    prefix: str = "p2:"
+
+
+# ----------------------------------------------------------------------
+# Change feed — shared marker codec + reply builder.
+# Browsers poll /api/storage/changes with the marker from their previous
+# reply and get back WHICH keys changed (keys only, never values) plus the
+# current presence map. Both backends must speak the exact same marker
+# format or a marker minted by one silently blinds a client of the other.
+# ----------------------------------------------------------------------
+UTC = datetime.timezone.utc
+
+PRESENCE_KEY = "p2:presence"
+FEED_EXCLUDE_KEYS = (PRESENCE_KEY,)                    # rides the reply separately —
+                                                       # heartbeats must never set the marker
+FEED_EXCLUDE_PREFIXES = ("p2:notifseen:", "p2:notifdismissed:")
+FEED_MAX_KEYS = 1000
+FEED_LOOKBACK = datetime.timedelta(seconds=2)          # absorbs commit-order inversion / NTP steps
+
+
+def parse_marker(since):
+    """Marker -> aware UTC datetime, or None = 'send everything'. NEVER raises.
+    An unreadable marker must fail OPEN (full resync, merely wasteful). The
+    opposite failure — silently matching nothing — blinds the browser forever."""
+    s = (since or "").strip()
+    if not s:
+        return None
+    s = s.replace("T", " ")
+    if s.endswith("Z"):
+        s = s[:-1] + "+00:00"
+    try:
+        dt = datetime.datetime.fromisoformat(s)
+    except ValueError:
+        return None
+    if dt.tzinfo is None:                              # bare = UTC, like CURRENT_TIMESTAMP
+        dt = dt.replace(tzinfo=UTC)
+    return dt.astimezone(UTC)
+
+
+def marker_text(dt):
+    """The ONE wire format both backends emit: UTC, ISO, explicit Z."""
+    return dt.astimezone(UTC).strftime("%Y-%m-%dT%H:%M:%S.%f")[:-3] + "Z"
+
+
+def feed_exclude_sql(ph):
+    """WHERE-clause fragment excluding feed-noise keys. ph = '?' or '%s'."""
+    parts, params = [], []
+    if FEED_EXCLUDE_KEYS:
+        parts.append("key NOT IN (" + ",".join([ph] * len(FEED_EXCLUDE_KEYS)) + ")")
+        params.extend(FEED_EXCLUDE_KEYS)
+    for p in FEED_EXCLUDE_PREFIXES:
+        parts.append("key NOT LIKE " + ph)             # wildcard lives in the VALUE
+        params.append(p + "%")
+    return ((" AND " + " AND ".join(parts)) if parts else ""), params
+
+
+def changes_reply(rows, since_echo, presence_raw):
+    """rows: (key, updated_at); updated_at is str (SQLite) or aware datetime (PG)."""
+    truncated = len(rows) > FEED_MAX_KEYS
+    rows = rows[:FEED_MAX_KEYS]
+    newest = parse_marker(since_echo)                  # seed with caller's marker: never walks backwards
+    changes = []
+    for key, at in rows:
+        dt = at if isinstance(at, datetime.datetime) else parse_marker(at)
+        if dt is None:
+            continue
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=UTC)
+        if newest is None or dt > newest:
+            newest = dt
+        changes.append({"key": key, "at": marker_text(dt)})
+    return {
+        "changes": changes,
+        # No rows -> keep the caller's marker. Advancing it to "now" would step
+        # over a write committing at this very instant.
+        "marker": marker_text(newest) if newest else (since_echo or ""),
+        "full": not since_echo,
+        "truncated": truncated,
+        "presence": presence_raw or "",                # raw JSON text of p2:presence
+    }
 
 
 class LoginBody(BaseModel):

@@ -36,6 +36,13 @@ from _gleenergy_common import (
     KeyBody,
     SetBody,
     ListBody,
+    ChangesBody,
+    parse_marker,
+    feed_exclude_sql,
+    changes_reply,
+    FEED_MAX_KEYS,
+    FEED_LOOKBACK,
+    PRESENCE_KEY,
 )
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/gleenergy")
@@ -70,6 +77,9 @@ def _ensure_tables(conn):
             "  expires_at DOUBLE PRECISION"
             ")"
         )
+        # Composite (updated_at, key): the change feed's ORDER BY becomes a
+        # pure index range scan instead of a sort.
+        cur.execute("CREATE INDEX IF NOT EXISTS kv_updated_at ON kv(updated_at, key)")
     conn.commit()
 
 
@@ -168,8 +178,11 @@ def storage_get(body: KeyBody):
 def storage_set(body: SetBody):
     with _pool().connection() as conn, conn.cursor() as cur:
         cur.execute(
+            # The WHERE keeps no-op re-saves from bumping updated_at — without it,
+            # half the change-feed events would carry no actual change.
             "INSERT INTO kv(key, value, updated_at) VALUES(%s, %s, now()) "
-            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()",
+            "ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now() "
+            "WHERE kv.value IS DISTINCT FROM EXCLUDED.value",
             (body.key, body.value),
         )
         conn.commit()
@@ -191,6 +204,31 @@ def storage_list(body: ListBody):
         cur.execute("SELECT key FROM kv WHERE key LIKE %s", (prefix + "%",))
         rows = cur.fetchall()
     return {"keys": [r[0] for r in rows]}
+
+
+@app.post("/api/storage/changes")
+def storage_changes(body: ChangesBody):
+    """See app.py:storage_changes — same contract, same reply shape.
+
+    The marker is bound as a Python AWARE datetime so psycopg adapts it to
+    timestamptz directly. Do NOT pass it as a string: a bare
+    'YYYY-MM-DD HH:MM:SS' cast to timestamptz is read in the session's
+    TimeZone setting, which on a Manila-configured role is 8 hours off —
+    in the direction that hides changes."""
+    since = parse_marker(body.since)
+    where, params = ["key LIKE %s"], [(body.prefix or "") + "%"]
+    if since is not None:
+        where.append("updated_at >= %s")
+        params.append(since - FEED_LOOKBACK)
+    frag, xparams = feed_exclude_sql("%s")
+    sql = ("SELECT key, updated_at FROM kv WHERE " + " AND ".join(where) + frag
+           + " ORDER BY updated_at, key LIMIT %s")
+    with _pool().connection() as conn, conn.cursor() as cur:
+        cur.execute(sql, params + xparams + [FEED_MAX_KEYS + 1])
+        rows = cur.fetchall()
+        cur.execute("SELECT value FROM kv WHERE key = %s", (PRESENCE_KEY,))
+        prow = cur.fetchone()
+    return changes_reply(rows, body.since, prow[0] if prow else "")
 
 
 # Attach the shared routes (email, SMS, health, index, static) LAST.

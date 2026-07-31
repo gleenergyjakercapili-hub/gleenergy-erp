@@ -50,6 +50,13 @@ from _gleenergy_common import (
     KeyBody,
     SetBody,
     ListBody,
+    ChangesBody,
+    parse_marker,
+    feed_exclude_sql,
+    changes_reply,
+    FEED_MAX_KEYS,
+    FEED_LOOKBACK,
+    PRESENCE_KEY,
 )
 
 # Where the database file lives (override with the GLEENERGY_DB env var if you like)
@@ -77,6 +84,9 @@ def _conn():
         "  expires_at REAL"
         ")"
     )
+    # Composite (updated_at, key): the change feed's ORDER BY updated_at, key
+    # becomes a pure index range scan instead of a sort.
+    conn.execute("CREATE INDEX IF NOT EXISTS kv_updated_at ON kv(updated_at, key)")
     return conn
 
 
@@ -160,8 +170,12 @@ def storage_get(body: KeyBody):
 def storage_set(body: SetBody):
     with contextlib.closing(_conn()) as conn:
         conn.execute(
+            # The WHERE keeps no-op re-saves from bumping updated_at — without it,
+            # half the change-feed events would carry no actual change.
+            # IS NOT (null-safe), not <>.
             "INSERT INTO kv(key, value, updated_at) VALUES(?, ?, CURRENT_TIMESTAMP) "
-            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP",
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP "
+            "WHERE kv.value IS NOT excluded.value",
             (body.key, body.value),
         )
         conn.commit()
@@ -182,6 +196,34 @@ def storage_list(body: ListBody):
     with contextlib.closing(_conn()) as conn:
         rows = conn.execute("SELECT key FROM kv WHERE key LIKE ?", (prefix + "%",)).fetchall()
     return {"keys": [r[0] for r in rows]}
+
+
+@app.post("/api/storage/changes")
+def storage_changes(body: ChangesBody):
+    """Which keys changed since the caller's marker — keys only, never values,
+    plus the current presence map (one PK lookup).
+
+    The marker is server-issued and OPAQUE: clients echo back whatever the last
+    reply gave them. It is always a timestamp taken off a real row, never the
+    clock, and the comparison is >= : SQLite's CURRENT_TIMESTAMP has one-second
+    resolution and this database routinely writes many keys in the same second,
+    so > would silently drop every same-second sibling of the marker row.
+    Clients de-dup on (key, at)."""
+    since = parse_marker(body.since)
+    where, params = ["key LIKE ?"], [(body.prefix or "") + "%"]
+    if since is not None:
+        # Floor to SQLite's stored format. Flooring (never rounding up) is what
+        # makes a microsecond marker minted by the Postgres backend safe here:
+        # worst case we replay a second, we never skip one.
+        where.append("updated_at >= ?")
+        params.append((since - FEED_LOOKBACK).strftime("%Y-%m-%d %H:%M:%S"))
+    frag, xparams = feed_exclude_sql("?")
+    sql = ("SELECT key, updated_at FROM kv WHERE " + " AND ".join(where) + frag
+           + " ORDER BY updated_at, key LIMIT ?")
+    with contextlib.closing(_conn()) as conn:
+        rows = conn.execute(sql, params + xparams + [FEED_MAX_KEYS + 1]).fetchall()
+        prow = conn.execute("SELECT value FROM kv WHERE key = ?", (PRESENCE_KEY,)).fetchone()
+    return changes_reply(rows, body.since, prow[0] if prow else "")
 
 
 @app.get("/api/export")

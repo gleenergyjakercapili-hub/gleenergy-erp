@@ -82,6 +82,9 @@
   h1,h2,h3,.sec-h{font-family:var(--display);letter-spacing:-.01em}
   button{font-family:var(--font);cursor:pointer}
   .hide{display:none !important}
+  /* During a live refresh the repaint must be invisible: no transitions, no
+     pulses, no bars regrowing from zero. Applied for ~60ms around the swap. */
+  .live-noanim,.live-noanim *{transition:none !important;animation:none !important}
   /* Boot splash — sits above everything until boot() decides login vs dashboard */
   #bootSplash{position:fixed;inset:0;z-index:10000;background:linear-gradient(160deg,var(--brand-dark),var(--brand-2));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;transition:opacity .28s ease}
   #bootSplash.bs-off{opacity:0;pointer-events:none}
@@ -1097,7 +1100,8 @@ if(typeof window.storage==="undefined"){
     get:async (k)=>{const d=await call("/get",{key:k}); return (d&&d.value!=null)?{key:k,value:d.value}:null;},
     set:async (k,v)=>{await call("/set",{key:k,value:String(v)}); return {key:k,value:v};},
     delete:async (k)=>{await call("/delete",{key:k}); return {key:k,deleted:true};},
-    list:async (p)=>{const d=await call("/list",{prefix:p||""}); return {keys:(d&&d.keys)||[]};}
+    list:async (p)=>{const d=await call("/list",{prefix:p||""}); return {keys:(d&&d.keys)||[]};},
+    changes:async (since,prefix)=>call("/changes",{since:since||"",prefix:prefix||"p2:"})
   };
 }
 
@@ -1394,6 +1398,32 @@ function seedSequences(){
 
 /* ============ storage ============ */
 const K={rbac:"p2:rbac",emp:"p2:employees",cli:"p2:clients",doc:"p2:documents",aud:"p2:audit",prop:"p2:proposals",seq:"p2:sequences",enr:"p2:enrollments",inv:"p2:inventory",proj:"p2:projects",sch:"p2:schedule",task:"p2:tasks",att:"p2:attendance",invc:"p2:invoices",exp:"p2:expenses",pay:"p2:payroll",paycfg:"p2:paycfg",mov:"p2:movements",po:"p2:purchaseorders",journal:"p2:journal",designcfg:"p2:designcfg",sup:"p2:suppliers",permits:"p2:permits",tickets:"p2:tickets",aftersales:"p2:aftersales",commissions:"p2:commissions",claims:"p2:claims",exptypes:"p2:exptypes",surveys:"p2:surveys",liq:"p2:liquidations",pr:"p2:purchaserequests",pfiles:"p2:payrollfiles",preg:"p2:payregister",prates:"p2:payrates",pplan:"p2:payplanned",assets:"p2:assets",invcats:"p2:invcats",recv:"p2:receiving",tools:"p2:toolissue",paytpl:"p2:paytemplates",jo:"p2:joborders",asbuilt:"p2:asbuilt",teams:"p2:teams",dplans:"p2:deployplans",sop:"p2:sops",checks:"p2:checks",recons:"p2:bankrecons",colls:"p2:collections",ap:"p2:payables",adv:"p2:advances",recur:"p2:recurring",vled:"p2:vehledgers"};
+/* ===== live sync: storage key -> DB collection =====
+   Explicit table, NEVER derived by stripping "p2:" — seven keys break that rule
+   (p2:payroll->payrolls, p2:bankrecons->recons, p2:collections->colls,
+   p2:payables->ap, p2:advances->adv, p2:recurring->recur, p2:vehledgers->vled).
+   p2:rbac is deliberately absent: permission edits apply on next sign-in, not
+   under a working user's feet. */
+const LIVE_MAP={
+ "p2:employees":"employees","p2:clients":"clients","p2:documents":"documents","p2:audit":"audit",
+ "p2:proposals":"proposals","p2:sequences":"sequences","p2:enrollments":"enrollments",
+ "p2:inventory":"inventory","p2:projects":"projects","p2:schedule":"schedule","p2:tasks":"tasks",
+ "p2:attendance":"attendance","p2:invoices":"invoices","p2:expenses":"expenses",
+ "p2:payroll":"payrolls","p2:paycfg":"paycfg","p2:movements":"movements",
+ "p2:purchaseorders":"purchaseorders","p2:journal":"journal","p2:designcfg":"designcfg",
+ "p2:suppliers":"suppliers","p2:permits":"permits","p2:tickets":"tickets",
+ "p2:aftersales":"aftersales","p2:commissions":"commissions","p2:claims":"claims",
+ "p2:exptypes":"exptypes","p2:surveys":"surveys","p2:liquidations":"liquidations",
+ "p2:purchaserequests":"purchaserequests","p2:payrollfiles":"payrollfiles",
+ "p2:payregister":"payregister","p2:payrates":"payrates","p2:payplanned":"payplanned",
+ "p2:assets":"assets","p2:invcats":"invcats","p2:receiving":"receiving","p2:toolissue":"toolissue",
+ "p2:paytemplates":"paytemplates","p2:joborders":"joborders","p2:asbuilt":"asbuilt",
+ "p2:teams":"teams","p2:deployplans":"deployplans","p2:sops":"sops","p2:checks":"checks",
+ "p2:bankrecons":"recons","p2:collections":"colls","p2:payables":"ap","p2:advances":"adv",
+ "p2:recurring":"recur","p2:vehledgers":"vled"
+};
+/* Boot warning so a future key can never silently drop off the live feed. */
+Object.keys(K).forEach(n=>{const k=K[n];if(k!=="p2:rbac"&&!LIVE_MAP[k])console.warn("LIVE_MAP missing",k);});
 let storageDegraded=false;
 function showDegradedBanner(){
   if(document.getElementById("degBanner"))return;
@@ -1603,10 +1633,171 @@ function clearSession(){try{localStorage.removeItem(SESSION_KEY);}catch(e){}}
 function readSession(){try{return localStorage.getItem(SESSION_KEY);}catch(e){return null;}}
 function avInitials(){return (user&&user.name?user.name.split(" ").map(x=>x[0]).slice(0,2).join(""):"?").toUpperCase();}
 function paintTopbarAvatar(){const av=document.getElementById("whoAv");if(!av||!user)return;if(user.photo){av.innerHTML=`<img src="${user.photo}" alt="" style="width:100%;height:100%;object-fit:cover;border-radius:50%">`;}else{av.textContent=avInitials();}}
+/* ===== live sync + presence =====
+   One poll (/api/storage/changes) every LIVE_MS carries BOTH the change feed
+   (which keys changed — keys only, never values) and the presence map, so
+   "data appears without refresh" and "who is online" cost one request per tab
+   per tick. Hidden tabs poll zero times. */
+const LIVE_MS=10000, LIVE_MAX_MS=120000, HB_WRITE_MS=20000, ONLINE_MS=60000; /* ONLINE_MS must stay >= 2.5x HB_WRITE_MS: heartbeat is read-modify-write on a shared key, and the margin makes a clobbered stamp still read as online */
 let presenceMap={};
-function isOnline(id){const t=presenceMap[id];return !!(t&&(Date.now()-t)<120000);}
-function refreshPresenceDots(){document.querySelectorAll(".dx-tm .st[data-emp]").forEach(el=>{const on=isOnline(el.dataset.emp);el.classList.toggle("st-Online",on);el.title=on?"Online":"Offline";});}
+let liveMarker="",liveWait=LIVE_MS,_liveSeen={},_liveDirty=new Set(),
+    _liveInFlight=false,_liveDetail=false,_liveUploads=0,_livePointer=false;
+window._liveTick=false;
+function isOnline(id){const t=presenceMap[id];return !!(t&&(Date.now()-t)<ONLINE_MS);}
+function refreshPresenceDots(){document.querySelectorAll(".dx-tm .st[data-emp]").forEach(el=>{const on=isOnline(el.dataset.emp);el.classList.toggle("st-Online",on);el.title=on?"Online (app open)":"Offline";});}
 async function pushHeartbeat(){if(typeof user==="undefined"||!user)return;try{const m=(await loadKey("p2:presence",{}))||{};m[user.id]=Date.now();presenceMap=m;await saveKey("p2:presence",m);refreshPresenceDots();}catch(e){}}
+/* Closing the tab / navigating away marks the person offline within one poll
+   instead of waiting out the ONLINE_MS timeout. keepalive lets the request
+   outlive the page. */
+addEventListener("pagehide",()=>{
+  if(typeof user==="undefined"||!user)return;
+  try{
+    const m=Object.assign({},presenceMap);delete m[user.id];
+    fetch((window.GLEENERGY_API||"/api/storage")+"/set",
+      {method:"POST",keepalive:true,headers:window.gleenergyHeaders(),
+       body:JSON.stringify({key:"p2:presence",value:JSON.stringify(m)})});
+  }catch(e){}
+});
+/* --- is it safe to redraw the screen right now? ---
+   One predicate for every automatic repaint. Anything that means "the user is
+   in the middle of something" must return true; the refresh simply waits. */
+function uiBusy(){
+  if(document.querySelector("#modalRoot .modal"))return true;          /* form modal open */
+  if(document.querySelector(".ui-dialog-overlay"))return true;         /* confirm dialog */
+  const pr=document.getElementById("printRoot");
+  if(pr&&!pr.classList.contains("hide"))return true;                   /* print preview */
+  if(document.getElementById("cmdkBg"))return true;                    /* Ctrl+K palette */
+  const ms=document.getElementById("msheetBg");
+  if(ms&&ms.classList.contains("open"))return true;                    /* phone sheet */
+  const np=document.getElementById("notifPanel");
+  if(np&&!np.classList.contains("hide"))return true;                   /* alerts panel: items bound by index */
+  const ae=document.activeElement;                                     /* caret in an input */
+  if(ae&&(/^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName)||ae.isContentEditable))return true;
+  if(_liveDetail)return true;                                          /* editor/detail screen in #view */
+  if(_liveUploads>0)return true;                                       /* FileReader in flight */
+  if(_livePointer)return true;                                         /* finger/button currently down */
+  if(document.querySelector(".rowact.open"))return true;               /* row action menu open */
+  try{if(String(window.getSelection()||"")!=="")return true;}catch(e){}/* text being copied */
+  return false;
+}
+document.addEventListener("mousedown",()=>{_livePointer=true;},true);
+document.addEventListener("mouseup",()=>{_livePointer=false;},true);
+document.addEventListener("touchstart",()=>{_livePointer=true;},{capture:true,passive:true});
+document.addEventListener("touchend",()=>{_livePointer=false;},{capture:true,passive:true});
+function liveStop(){if(window._liveTimer){clearTimeout(window._liveTimer);window._liveTimer=null;}}
+function liveSchedule(ms){liveStop();if(!document.hidden&&typeof user!=="undefined"&&user)window._liveTimer=setTimeout(livePoll,ms);}
+function liveStart(){liveSchedule(0);}
+async function livePoll(){
+  if(typeof user==="undefined"||!user||document.hidden||_liveInFlight){liveSchedule(liveWait);return;}
+  _liveInFlight=true;
+  let more=false;
+  try{
+    const r=await window.storage.changes(liveMarker,"p2:");
+    liveWait=LIVE_MS;                                   /* success: reset backoff */
+    if(r&&r.presence){try{presenceMap=JSON.parse(r.presence)||{};refreshPresenceDots();}catch(e){}}
+    const first=!liveMarker;
+    liveMarker=(r&&r.marker)||liveMarker;
+    more=!!(r&&r.truncated);
+    (r&&r.changes||[]).forEach(c=>{
+      if(_liveSeen[c.key]===c.at)return;                /* de-dup on (key, at) */
+      _liveSeen[c.key]=c.at;
+      /* First call only seeds the marker+seen set — init() already loaded everything. */
+      if(!first&&LIVE_MAP[c.key])_liveDirty.add(c.key);
+    });
+    if(_liveDirty.size)await liveApply();
+  }catch(e){
+    liveWait=Math.min(liveWait*2,LIVE_MAX_MS);          /* failure: back off */
+  }finally{
+    _liveInFlight=false;
+    liveSchedule(more?0:liveWait);
+  }
+}
+async function liveApply(){
+  if(uiBusy())return;                                   /* keep dirty; retry next tick */
+  const deps=VIEWKEYS[currentView]||[];
+  const need=[..._liveDirty].filter(k=>deps.indexOf(k)>=0);
+  if(!need.length)return;                               /* nothing this view shows — drain on nav */
+  for(const k of need){                                 /* refresh ONLY what this view reads */
+    const coll=LIVE_MAP[k];
+    const cur=DB[coll];
+    DB[coll]=await loadKey(k,Array.isArray(cur)?[]:{});
+    _liveDirty.delete(k);
+  }
+  if(uiBusy())return;                                   /* a modal may have opened during the awaits */
+  const asg=need.indexOf("p2:schedule")>=0||need.indexOf("p2:joborders")>=0;
+  liveRepaint();
+  if(asg)assignmentToast();
+}
+function liveRepaint(){
+  const fn=VIEWFN[currentView];if(!fn)return;
+  const v=V();const sc=v?[...v.querySelectorAll(".tbl-scroll")].map(e=>e.scrollTop):[];
+  const py=window.scrollY;
+  if(v)v.classList.add("live-noanim");
+  window._liveTick=true;
+  try{fn();}catch(e){console.error("live repaint failed",e);}
+  finally{window._liveTick=false;}
+  const v2=V();
+  if(v2){const s2=v2.querySelectorAll(".tbl-scroll");sc.forEach((t,i)=>{if(s2[i])s2[i].scrollTop=t;});}
+  window.scrollTo(0,py);
+  setTimeout(()=>{const v3=V();if(v3)v3.classList.remove("live-noanim");},60);
+  if(typeof refreshNavBadges==="function")refreshNavBadges();
+  refreshPresenceDots();
+}
+/* Assignment toast — the useful half of the old syncAssignments poller. */
+let _myAsgCount=null;
+function assignmentToast(){
+  if(typeof user==="undefined"||!user)return;
+  const mine=()=>((typeof myAssignments==="function")?myAssignments(user.name,0).length:0)
+    +(DB.joborders||[]).filter(j=>["Done","Cancelled"].indexOf(j.status||"Open")<0&&((j.labors||[]).includes(user.name)||j.assignedTo===user.name)).length;
+  const n=mine();
+  if(_myAsgCount!=null&&n>_myAsgCount){try{toast("📣 New assignment for you — see your dashboard","ok");}catch(e){}}
+  _myAsgCount=n;
+}
+/* Which storage keys does each view actually show? Union across a module's
+   tabs — a superset costs an occasional wasted repaint; a subset leaves the
+   other tabs stale. NEVER a wildcard: logAudit() writes p2:audit on nearly
+   every action in the company. */
+const VIEWKEYS={
+ dashboard:["p2:attendance","p2:claims","p2:clients","p2:commissions","p2:documents","p2:employees",
+   "p2:expenses","p2:inventory","p2:invoices","p2:joborders","p2:journal","p2:liquidations",
+   "p2:movements","p2:payroll","p2:projects","p2:proposals","p2:purchaseorders",
+   "p2:purchaserequests","p2:schedule","p2:surveys","p2:tasks","p2:aftersales","p2:assets",
+   "p2:checks","p2:recurring","p2:enrollments","p2:sequences","p2:payregister"],
+ clients:["p2:clients","p2:projects","p2:surveys"],
+ proposals:["p2:proposals"],
+ followups:["p2:sequences","p2:enrollments","p2:clients"],
+ survey:["p2:surveys","p2:asbuilt"],
+ projects:["p2:projects","p2:clients","p2:expenses","p2:invoices"],
+ inventory:["p2:inventory","p2:movements","p2:projects","p2:receiving","p2:toolissue","p2:invcats"],
+ purchasing:["p2:purchaseorders","p2:suppliers","p2:projects","p2:inventory","p2:purchaserequests"],
+ permits:["p2:permits","p2:tickets"],
+ aftersales:["p2:aftersales"],
+ schedule:["p2:schedule","p2:assets","p2:deployplans","p2:teams"],
+ tasks:["p2:tasks","p2:clients"],
+ joborders:["p2:joborders"],
+ attendance:["p2:attendance","p2:employees","p2:projects","p2:paycfg"],
+ claims:["p2:claims","p2:liquidations"],
+ finance:["p2:invoices","p2:expenses","p2:projects","p2:inventory"],
+ commissions:["p2:clients","p2:projects","p2:proposals","p2:commissions","p2:designcfg","p2:invoices"],
+ accounting:["p2:expenses","p2:journal","p2:projects","p2:purchaseorders","p2:invoices","p2:movements",
+   "p2:payroll","p2:paytemplates","p2:clients","p2:attendance","p2:inventory","p2:collections",
+   "p2:checks","p2:bankrecons","p2:payables","p2:advances","p2:recurring","p2:vehledgers"],
+ payroll:["p2:payroll","p2:paycfg","p2:payrollfiles","p2:payregister","p2:payrates","p2:payplanned",
+   "p2:employees","p2:attendance","p2:clients","p2:projects"],
+ sops:["p2:sops"],
+ employees:["p2:employees","p2:payrates"],
+ roles:[],
+ documents:["p2:documents"],
+ audit:["p2:audit"]
+};
+const VIEWFN={dashboard:()=>viewDashboard(),clients:()=>viewClients(),proposals:()=>viewProposals(),
+ followups:()=>viewFollowups(),survey:()=>viewSurvey(),projects:()=>viewProjects(),
+ inventory:()=>viewInventory(),purchasing:()=>viewPurchasing(),permits:()=>viewPermits(),
+ aftersales:()=>viewAfterSales(),schedule:()=>viewSchedule(),tasks:()=>viewTasks(),
+ joborders:()=>viewJobOrders(),attendance:()=>viewAttendance(),claims:()=>viewClaims(),
+ finance:()=>viewFinance(),commissions:()=>viewCommissions(),accounting:()=>viewAccounting(),
+ payroll:()=>viewPayroll(),sops:()=>viewSOPs(),employees:()=>viewEmployees(),
+ roles:()=>viewRoles(),documents:()=>viewDocuments(),audit:()=>viewAudit()};
 function enterApp(){
   document.getElementById("login").classList.add("hide");document.getElementById("app").classList.remove("hide");
   document.getElementById("whoName").textContent=user.name;document.getElementById("whoRole").textContent=user.role;
@@ -1620,11 +1811,16 @@ function enterApp(){
   /* The change-password entry lives behind the profile avatar — the topbar
      stays clean, and the voluntary change stays one click away. */
   {const _av=document.getElementById("whoAv");if(_av)_av.onclick=()=>changePwForm(false);}
-  pushHeartbeat();if(!window._hbTimer)window._hbTimer=setInterval(pushHeartbeat,45000);
-  if(!window._syncTimer)window._syncTimer=setInterval(syncAssignments,45000);
+  pushHeartbeat();if(!window._hbTimer)window._hbTimer=setInterval(()=>{if(!document.hidden)pushHeartbeat();},HB_WRITE_MS);
+  _myAsgCount=null;   /* fresh baseline per sign-in — no false "new assignment" toast */
+  liveStart();
   /* Phone unlocked / app tabbed back in → check for new assignments right away instead
      of waiting for the next 45s tick. */
-  if(!window._syncVis){window._syncVis=true;document.addEventListener("visibilitychange",()=>{if(!document.hidden)syncAssignments();});}
+  /* Screen off = zero polling (battery + data). Screen back on = catch up now. */
+  if(!window._liveVis){window._liveVis=true;document.addEventListener("visibilitychange",()=>{
+    if(document.hidden){liveStop();}
+    else{liveStart();pushHeartbeat();}
+  });}
   buildMobileNav();
   buildNav();go("dashboard");renderNotifications();
 }
@@ -1632,24 +1828,9 @@ function enterApp(){
    keys so an assignment made by the Operations Manager on another machine pops up on
    the laborer's phone within a minute — bell, badge, toast and dashboard cards — without
    them tapping anything. Quiet when nothing changed; never redraws under an open modal. */
-async function syncAssignments(force){
-  try{
-    if(typeof user==="undefined"||!user||(document.hidden&&!force))return;
-    const sch=await loadKey(K.sch,[]),jo=await loadKey(K.jo,[]);
-    if(JSON.stringify(sch)===JSON.stringify(DB.schedule)&&JSON.stringify(jo)===JSON.stringify(DB.joborders))return;
-    const mine=()=>((typeof myAssignments==="function")?myAssignments(user.name,0).length:0)
-      +(DB.joborders||[]).filter(j=>["Done","Cancelled"].indexOf(j.status||"Open")<0&&((j.labors||[]).includes(user.name)||j.assignedTo===user.name)).length;
-    const before=mine();
-    DB.schedule=sch;DB.joborders=jo;
-    const after=mine();
-    refreshNavBadges();renderNotifications();
-    const gotNew=after>before;
-    if(gotNew){try{toast("📣 New assignment for you — see your dashboard","ok");}catch(e){}}
-    /* Redraw the dashboard only for the person whose own assignments changed, and never
-       while a modal or dialog is open under their fingers. */
-    if(gotNew&&currentView==="dashboard"&&!document.querySelector("#modalRoot .modal")&&!document.querySelector(".ui-dialog-overlay"))viewDashboard();
-  }catch(e){}
-}
+/* syncAssignments (the old 45s schedule/job-order poller) is retired: the live
+   change feed reloads those keys the moment they change, liveApply repaints
+   under the uiBusy() guard, and assignmentToast() keeps its notification. */
 /* ===== phone bottom navigation (app-style shell) =====
    Replaces the stacked sidebar on phones: Home, Search, a module-menu FAB, Alerts and
    Profile are always one thumb-tap away, so crew never scroll through the nav to reach
@@ -1876,6 +2057,7 @@ async function doLogin(){
 async function logout(){logAudit("logout","session",user?user.name:"","Signed out");
   const _id=user?user.id:null;
   if(window._hbTimer){clearInterval(window._hbTimer);window._hbTimer=null;}
+  liveStop();
   if(_id){try{const m=(await loadKey("p2:presence",{}))||{};delete m[_id];presenceMap=m;await saveKey("p2:presence",m);refreshPresenceDots();}catch(e){}}
   user=null;clearSession();
   try{await fetch("/api/auth/logout",{method:"POST"});}catch(e){}
@@ -1888,7 +2070,7 @@ window._authExpired=function(){
   if(window._authExpiredOnce)return;window._authExpiredOnce=true;
   if(typeof user==="undefined"||!user)return;
   if(window._hbTimer){clearInterval(window._hbTimer);window._hbTimer=null;}
-  if(window._syncTimer){clearInterval(window._syncTimer);window._syncTimer=null;}
+  liveStop();
   user=null;
   document.getElementById("app").classList.add("hide");
   document.getElementById("login").classList.remove("hide");
@@ -2020,6 +2202,7 @@ function buildNav(){const nav=document.getElementById("nav");nav.innerHTML="";
   if(typeof currentView!=="undefined"&&currentView){const b=nav.querySelector(`button[data-id="${currentView}"]`);if(b)b.classList.add("active");}
   refreshNavGroupBadges();}
 function go(id){
+  _liveDetail=false;   /* leaving any editor/detail screen — live refresh may resume */
   const map={dashboard:"dashboard.view",clients:"clients.view",proposals:"proposals.view",followups:"followups.view",survey:"survey.view",projects:"projects.view",inventory:"inventory.view",purchasing:"purchasing.view",permits:"liaison.view",aftersales:"aftersales.view",schedule:"schedule.view",tasks:"tasks.view",joborders:"joborders.view",attendance:"attendance.view",claims:"claims.submit",finance:"finance.view",commissions:"commissions.view",accounting:"accounting.view",payroll:"payroll.view",sops:"sop.view",employees:"employees.view",roles:"roles.manage",documents:"documents.view",audit:"audit.view"};
   if(!can(map[id]))id="dashboard"; currentView=id;
   document.querySelectorAll("#nav button[data-id]").forEach(b=>b.classList.toggle("active",b.dataset.id===id));
@@ -2035,6 +2218,9 @@ function go(id){
   if(typeof renderNotifications==="function")renderNotifications();
   if(typeof refreshNavBadges==="function")refreshNavBadges();
   if(typeof applyPendingFocus==="function")applyPendingFocus();
+  /* Drain any changes that arrived for THIS view while the user was elsewhere
+     (dirty keys are refreshed lazily to keep phone bandwidth down). */
+  if(typeof _liveDirty!=="undefined"&&_liveDirty.size&&typeof liveApply==="function")liveApply();
   /* Fade/lift the new view in. Only on navigation — re-renders inside a module
      (filters, search, saves) must not re-animate or the screen twitches constantly. */
   {const _v=document.getElementById("view");
@@ -2697,6 +2883,7 @@ async function purgeProposal(id){
 
 let EDIT=null;
 function proposalEditor(id,client,keep){
+  _liveDetail=true;   /* editor screen inside #view: live refresh must not eject the user */
   EDIT=keep?EDIT:(id?JSON.parse(JSON.stringify(DB.proposals.find(x=>x.id===id))):newProposal(client));
   const p=EDIT;const t=propTotals(p);
   const statuses=["Draft","Sent","Viewed","Signed","Rejected"];
@@ -4797,6 +4984,7 @@ async function prepBomFromSurvey(id){
   await saveKey(K.proj,DB.projects);await logAudit("update","project",pr.name,"BOM prepared from survey "+(s.refNo||s.date||""));openProject(id);
 }
 function openProject(id){
+  _liveDetail=true;   /* project file inside #view: live refresh must not eject the user */
   const pr=DB.projects.find(x=>x.id===id);if(!pr)return;
   const stages=["Site Survey","Design","Permitting","Installation","Commissioning","Handover"];
   const _sv=projSurvey(pr),_svDone=!!_sv.completed;
@@ -5355,7 +5543,7 @@ function siteSchedForm(id,preset){
      await saveKey(K.sch,DB.schedule);
      if(e._planId){const pl=(DB.deployplans||[]).find(x=>x.id===e._planId);if(pl){pl.status="Scheduled";await saveKey(K.dplans,DB.deployplans);}}
      /* The assigned crew's notifications derive from this record — refresh immediately so
-        the saver's own bell/badges update; other devices pick it up via syncAssignments. */
+        the saver's own bell/badges update; other devices pick it up via the live change feed. */
      try{refreshNavBadges();renderNotifications();}catch(_e){}
      closeModal();viewSchedule();}]]);
   const _mb=document.getElementById("f_smapBtn");
@@ -5968,7 +6156,7 @@ function svCompress(file,cb){
   };img.onerror=()=>alert("Could not read that image.");img.src=r.result;};
   r.readAsDataURL(file);
 }
-function svCompressP(file){return new Promise(res=>{try{svCompress(file,res);}catch(e){res("");}});}
+function svCompressP(file){_liveUploads++;return new Promise(res=>{const done=v=>{_liveUploads=Math.max(0,_liveUploads-1);res(v);};try{svCompress(file,done);}catch(e){done("");}});}
 function svRenderPhotos(catKey){
   const box=document.getElementById("svph_"+catKey);if(!box)return;
   const arr=_svPhotos[catKey]||[];
@@ -7062,6 +7250,7 @@ async function openPayrollFile(id){
   viewPayroll();
 }
 function payrollFileViewer(){
+  _liveDetail=true;   /* workbook viewer inside #view: live refresh must not eject the user */
   const meta=(DB.payrollfiles||[]).find(f=>f.id===pfOpenId);
   const back=`<button class="btn btn-light" onclick="pfOpenId='';viewPayroll()">← Back to list</button>`;
   const data=pfCache[pfOpenId];
@@ -7634,6 +7823,7 @@ function genRunForm(){
   const rt=document.getElementById("f_rtype");if(rt)rt.onchange=()=>{const wk=rt.value==="weekly";document.getElementById("wrapMonth").style.display=wk?"none":"";document.getElementById("wrapWeek").style.display=wk?"":"none";};
 }
 function viewRun(id){
+  _liveDetail=true;   /* payroll run detail inside #view: live refresh must not eject the user */
   const r=DB.payrolls.find(x=>x.id===id);if(!r)return;
   const tot=k=>r.slips.reduce((s,x)=>s+(+x[k]||0),0);
   const weekly=r.freq==="Weekly";
@@ -10288,6 +10478,7 @@ function _cuParse(s){
 }
 function animateCounters(root){
   if(!root)return;
+  if(window._liveTick)return;   /* live refresh: values are already painted — no recount-from-zero */
   try{if(window.matchMedia&&matchMedia("(prefers-reduced-motion:reduce)").matches)return;}catch(e){}
   root.querySelectorAll(".dx-tile .tv:not([data-cu]),.ceokpi .kv:not([data-cu]),.ceo-q .qv:not([data-cu]),.dx-h .hv:not([data-cu])").forEach(el=>{
     el.setAttribute("data-cu","1");
