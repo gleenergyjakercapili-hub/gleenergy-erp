@@ -906,6 +906,13 @@
   .ceo-upcoming{display:flex;flex-direction:column;gap:10px;max-height:322px;overflow:auto;scrollbar-width:thin;scrollbar-color:rgba(80,46,138,.35) transparent}
   .ceo-upcoming::-webkit-scrollbar{width:8px}.ceo-upcoming::-webkit-scrollbar-thumb{background:rgba(80,46,138,.3);border-radius:8px;border:2px solid transparent;background-clip:content-box}
   /* --- Inventory category tabs (stock-card workbook style) --- */
+  /* Item visuals: photo thumbnails and category glyphs, shown wherever a
+     material is listed (stock, BOM, purchasing, receiving) so the keeper can
+     recognize items by appearance. Same footprint whether photo or glyph. */
+  .ithumb{flex:0 0 auto;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;border:1px solid var(--line);background:#fff;vertical-align:middle;overflow:hidden}
+  img.ithumb{object-fit:cover;cursor:zoom-in}
+  .ithumb-g{color:var(--brand);background:#f4f0fb}
+  .ithumb-g svg{width:62%;height:62%}
   .invcats{display:flex;gap:7px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:thin;scrollbar-color:rgba(80,46,138,.4) transparent}
   .invcats::-webkit-scrollbar{height:8px}.invcats::-webkit-scrollbar-track{background:transparent}
   .invcats::-webkit-scrollbar-thumb{background:rgba(80,46,138,.32);border-radius:8px;border:2px solid transparent;background-clip:content-box}
@@ -1458,7 +1465,7 @@ function seedSequences(){
 }
 
 /* ============ storage ============ */
-const K={rbac:"p2:rbac",emp:"p2:employees",cli:"p2:clients",doc:"p2:documents",aud:"p2:audit",prop:"p2:proposals",seq:"p2:sequences",enr:"p2:enrollments",inv:"p2:inventory",proj:"p2:projects",sch:"p2:schedule",task:"p2:tasks",att:"p2:attendance",invc:"p2:invoices",exp:"p2:expenses",pay:"p2:payroll",paycfg:"p2:paycfg",mov:"p2:movements",po:"p2:purchaseorders",journal:"p2:journal",designcfg:"p2:designcfg",sup:"p2:suppliers",permits:"p2:permits",tickets:"p2:tickets",aftersales:"p2:aftersales",commissions:"p2:commissions",claims:"p2:claims",exptypes:"p2:exptypes",surveys:"p2:surveys",liq:"p2:liquidations",pr:"p2:purchaserequests",pfiles:"p2:payrollfiles",preg:"p2:payregister",prates:"p2:payrates",pplan:"p2:payplanned",assets:"p2:assets",invcats:"p2:invcats",recv:"p2:receiving",tools:"p2:toolissue",paytpl:"p2:paytemplates",jo:"p2:joborders",asbuilt:"p2:asbuilt",teams:"p2:teams",dplans:"p2:deployplans",sop:"p2:sops",checks:"p2:checks",recons:"p2:bankrecons",colls:"p2:collections",ap:"p2:payables",adv:"p2:advances",recur:"p2:recurring",vled:"p2:vehledgers"};
+const K={rbac:"p2:rbac",emp:"p2:employees",cli:"p2:clients",doc:"p2:documents",aud:"p2:audit",prop:"p2:proposals",seq:"p2:sequences",enr:"p2:enrollments",inv:"p2:inventory",proj:"p2:projects",sch:"p2:schedule",task:"p2:tasks",att:"p2:attendance",invc:"p2:invoices",exp:"p2:expenses",pay:"p2:payroll",paycfg:"p2:paycfg",mov:"p2:movements",po:"p2:purchaseorders",journal:"p2:journal",designcfg:"p2:designcfg",sup:"p2:suppliers",permits:"p2:permits",tickets:"p2:tickets",aftersales:"p2:aftersales",commissions:"p2:commissions",claims:"p2:claims",exptypes:"p2:exptypes",surveys:"p2:surveys",liq:"p2:liquidations",pr:"p2:purchaserequests",pfiles:"p2:payrollfiles",preg:"p2:payregister",prates:"p2:payrates",pplan:"p2:payplanned",assets:"p2:assets",invcats:"p2:invcats",recv:"p2:receiving",tools:"p2:toolissue",paytpl:"p2:paytemplates",jo:"p2:joborders",asbuilt:"p2:asbuilt",teams:"p2:teams",dplans:"p2:deployplans",sop:"p2:sops",checks:"p2:checks",recons:"p2:bankrecons",colls:"p2:collections",ap:"p2:payables",adv:"p2:advances",recur:"p2:recurring",vled:"p2:vehledgers",itemthumbs:"p2:itemthumbs"};
 /* ===== live sync: storage key -> DB collection =====
    Explicit table, NEVER derived by stripping "p2:" — seven keys break that rule
    (p2:payroll->payrolls, p2:bankrecons->recons, p2:collections->colls,
@@ -1481,7 +1488,7 @@ const LIVE_MAP={
  "p2:paytemplates":"paytemplates","p2:joborders":"joborders","p2:asbuilt":"asbuilt",
  "p2:teams":"teams","p2:deployplans":"deployplans","p2:sops":"sops","p2:checks":"checks",
  "p2:bankrecons":"recons","p2:collections":"colls","p2:payables":"ap","p2:advances":"adv",
- "p2:recurring":"recur","p2:vehledgers":"vled"
+ "p2:recurring":"recur","p2:vehledgers":"vled","p2:itemthumbs":"itemthumbs"
 };
 /* Boot warning so a future key can never silently drop off the live feed. */
 Object.keys(K).forEach(n=>{const k=K[n];if(k!=="p2:rbac"&&!LIVE_MAP[k])console.warn("LIVE_MAP missing",k);});
@@ -1567,6 +1574,7 @@ async function init(){
   DB.payplanned=await loadKey(K.pplan,[]);
   DB.assets=await loadKey(K.assets,null)||(await saveKey(K.assets,seedAssets()),seedAssets());
   DB.invcats=await loadKey(K.invcats,null)||(await saveKey(K.invcats,seedInvCats()),seedInvCats());
+  DB.itemthumbs=await loadKey(K.itemthumbs,null)||{};
   DB.receiving=await loadKey(K.recv,[]);
   DB.toolissue=await loadKey(K.tools,[]);
   DB.paytemplates=await loadKey(K.paytpl,null)||(await saveKey(K.paytpl,seedPayTemplates()),seedPayTemplates());
@@ -1833,8 +1841,8 @@ const VIEWKEYS={
  followups:["p2:sequences","p2:enrollments","p2:clients"],
  survey:["p2:surveys","p2:asbuilt"],
  projects:["p2:projects","p2:clients","p2:expenses","p2:invoices"],
- inventory:["p2:inventory","p2:movements","p2:projects","p2:receiving","p2:toolissue","p2:invcats"],
- purchasing:["p2:purchaseorders","p2:suppliers","p2:projects","p2:inventory","p2:purchaserequests"],
+ inventory:["p2:inventory","p2:movements","p2:projects","p2:receiving","p2:toolissue","p2:invcats","p2:itemthumbs"],
+ purchasing:["p2:purchaseorders","p2:suppliers","p2:projects","p2:inventory","p2:purchaserequests","p2:itemthumbs"],
  permits:["p2:permits","p2:tickets"],
  aftersales:["p2:aftersales"],
  schedule:["p2:schedule","p2:assets","p2:deployplans","p2:teams"],
@@ -4028,7 +4036,7 @@ async function goLiveReset(){
   try{await saveKey(K.seq,seedSequences());}catch(e){}
   try{DB.inventory.forEach(i=>{i.qty=0;});await saveKey(K.inv,DB.inventory);}catch(e){}
   try{const r=await window.storage.list("p2:",true);const keys=(r&&r.keys)||[];
-    for(const k of keys){if(/^p2:(docfile:|turnoverfile:|claimrcpt:|rcpt|savedreport|report:|presence$|notifseen:|notifdismissed:)/.test(k)){try{await window.storage.delete(k,true);}catch(e){}}}
+    for(const k of keys){if(/^p2:(docfile:|turnoverfile:|claimrcpt:|itemimg:|rcpt|savedreport|report:|presence$|notifseen:|notifdismissed:)/.test(k)){try{await window.storage.delete(k,true);}catch(e){}}}
   }catch(e){}
   alert("Database is now live and empty — ready for your real records. The system will reload.");
   location.reload();
@@ -4156,9 +4164,9 @@ function bomStockCheckHTML(){
   let tracked=0,covered=0,shortItems=0,customLines=0;
   const rows=(pr.materials||[]).map(m=>{
     const it=DB.inventory.find(i=>i.id===m.itemId);const req=+m.qty||0;
-    if(!it){customLines++;return `<tr><td>${esc(m.name||"(custom item)")} <span class="tag t-lead">custom</span></td><td style="text-align:right">${req}</td><td style="text-align:right;color:var(--muted)">—</td><td style="text-align:right;color:var(--muted)">—</td><td><span style="color:var(--muted)">Not tracked in inventory</span></td></tr>`;}
+    if(!it){customLines++;return `<tr><td><div style="display:flex;align-items:center;gap:9px">${itemThumb(null,28,m.name||"")}<span>${esc(m.name||"(custom item)")} <span class="tag t-lead">custom</span></span></div></td><td style="text-align:right">${req}</td><td style="text-align:right;color:var(--muted)">—</td><td style="text-align:right;color:var(--muted)">—</td><td><span style="color:var(--muted)">Not tracked in inventory</span></td></tr>`;}
     tracked++;const onHand=+it.qty||0,after=onHand-req,ok=onHand>=req;if(ok)covered++;else shortItems++;
-    return `<tr><td><b>${esc(it.name)}</b><div style="font-size:11px;color:var(--muted)">${esc(it.category||"")}</div></td>
+    return `<tr><td><div style="display:flex;align-items:center;gap:9px">${itemThumb(it.id,28)}<div><b>${esc(it.name)}</b><div style="font-size:11px;color:var(--muted)">${esc(it.category||"")}</div></div></div></td>
       <td style="text-align:right">${req} ${esc(it.unit||"")}</td>
       <td style="text-align:right"><b style="color:${ok?'var(--ink)':'var(--red)'}">${onHand}</b></td>
       <td style="text-align:right;color:${after<0?'var(--red)':'var(--muted)'}">${after}</td>
@@ -4205,7 +4213,7 @@ function salesSummaryView(tabBar){
      <input class="search" id="ssMonth" type="month" value="${esc(ym)}" style="width:150px">
      <button class="btn btn-light" id="ssExp">Export CSV</button></div></div>
    ${rows.length?`<div style="overflow-x:auto"><table><thead><tr><th>Product</th><th>SKU</th><th style="text-align:right">Qty sold</th><th style="text-align:right">Revenue</th><th style="text-align:right">Cost (est.)</th><th style="text-align:right">Margin</th><th style="text-align:right">Internal qty</th></tr></thead><tbody>
-   ${rows.map(g=>`<tr><td><b>${esc(g.name)}</b></td><td style="font-size:12px">${esc(g.sku||"—")}</td>
+   ${rows.map(g=>`<tr><td><div style="display:flex;align-items:center;gap:9px">${itemThumb(g.itemId||g.name,28,g.name)}<b>${esc(g.name)}</b></div></td><td style="font-size:12px">${esc(g.sku||"—")}</td>
      <td style="text-align:right">${g.sold||"—"}</td>
      <td style="text-align:right">${g.sold?peso(g.rev):"—"}</td>
      <td style="text-align:right">${g.sold?peso(g.cost):"—"}</td>
@@ -4217,6 +4225,126 @@ function salesSummaryView(tabBar){
   document.getElementById("ssExp").onclick=()=>exportCSV("stock_out_summary_"+ym+".csv",
     ["Product","SKU","Qty sold","Revenue","Cost (est.)","Margin","Internal qty"],
     rows.map(g=>[g.name,g.sku,g.sold,g.rev,g.cost,g.margin,g.internal]));
+}
+/* ===== ITEM VISUALS — photos + category glyphs =====
+   Two layers so the inventory keeper can recognize materials at a glance:
+   1) Category glyph: every item automatically gets an outline icon matched
+      from its category + name (panel, inverter, battery, breaker, conduit,
+      connector, tool, cable, fastener, generic box). Zero effort, always on.
+   2) Real photo: optional, added on the item form. A small 128px thumbnail
+      lives in ONE map key (p2:itemthumbs) so lists render instantly and the
+      live feed keeps every screen current; the full-size photo sits under its
+      own per-item key (p2:itemimg:<id>) and is fetched only when zoomed.
+      Photos NEVER sit on the p2:inventory array itself — that key is re-saved
+      wholesale on every edit and polled every 10s, so it must stay small. */
+const ITEMIMG_PREFIX="p2:itemimg:";
+const ITEM_GLYPHS={
+ panel:_NI('<rect x="3" y="4.5" width="18" height="13" rx="1.5"/><path d="M3 8.8h18M3 13.1h18M9 4.5v13M15 4.5v13"/><path d="M12 17.5v3M8.5 20.5h7"/>'),
+ inverter:_NI('<rect x="3.5" y="4.5" width="17" height="15" rx="2"/><path d="M19 6.5 5 17.5"/><path d="M6.5 8.5h4.5"/><path d="M13 15.5c.9-1.7 2-1.7 2.9 0s2 1.7 2.9 0"/>'),
+ battery:_NI('<rect x="2.8" y="7.5" width="16.5" height="9.5" rx="2"/><path d="M21.5 10.5v3.5"/><path d="M7 10.5v3.5M11 10.5v3.5"/>'),
+ breaker:_NI('<rect x="8" y="3.5" width="8" height="17" rx="2"/><path d="M12 6.8v4"/><circle cx="12" cy="15.8" r="1.7"/>'),
+ conduit:_NI('<path d="M3.5 8.5h6.5a8.5 8.5 0 0 1 8.5 8.5v3.5"/><path d="M3.5 13.5h6.5a3.5 3.5 0 0 1 3.5 3.5v3.5"/><path d="M3.5 8.5v5"/><path d="M13.5 20.5h5"/>'),
+ connector:_NI('<path d="M9 6.5V3M15 6.5V3"/><path d="M6.5 6.5h11v5.5a5.5 5.5 0 0 1-11 0z"/><path d="M12 17.5V21"/>'),
+ tool:_NI('<path d="M14.7 6.3a4.2 4.2 0 0 0-5.8 5L4 16.2a2 2 0 1 0 2.9 2.9l4.9-4.9a4.2 4.2 0 0 0 5-5.8l-2.7 2.7-2.1-2.1z"/>'),
+ cable:_NI('<circle cx="9.5" cy="9.5" r="6.3"/><circle cx="9.5" cy="9.5" r="2.1"/><path d="M15 13.5c3.2 1.6 5.5 4 5.5 7.5"/>'),
+ rail:_NI('<path d="M12 3.2 19.6 7.6v8.8L12 20.8 4.4 16.4V7.6z"/><circle cx="12" cy="12" r="3.2"/>'),
+ box:_NI('<path d="M21 8.5v9l-9 4-9-4v-9"/><path d="M3 8.5l9-4 9 4-9 4z"/><path d="M12 12.5V21"/>')
+};
+/* First match wins — order matters (e.g. "Cable Moulding / Tray" must hit
+   conduit before the generic cable rule; "Butt Connector" before cable). */
+const ITEM_GLYPH_RULES=[
+ ["panel",/solar panel|pv module|\bpanel/],
+ ["inverter",/invert|\bgti\b|hybrid/],
+ ["battery",/batter|lifepo|\bkwh\b/],
+ ["breaker",/breaker|\bmcb\b|mccb|\bspd\b|busbar|transformer|pilot lamp|fuse|contactor|relay/],
+ ["conduit",/conduit|pipe|elbow|coupling|moulding|molding|tray|hdpe|\bimc\b|pull box|pvc/],
+ ["connector",/mc4|connector|lug|ferrule|solderless|adaptor|adapter|bushing|\bhub\b|terminal|coupler/],
+ ["tool",/tool|drill|holesaw|hole saw|cutting disc|blade|\bsaw\b|grinder|crimp/],
+ ["cable",/cable|wire|thhn|philflex|awg|cord/],
+ ["rail",/rail|clamp|bolt|screw|unistrut|strut|hanger|\btox\b|\btex\b|tek|mount|bracket|roof|dyna|anchor/]
+];
+function itemGlyphKey(txt){const t=String(txt||"").toLowerCase();for(const r of ITEM_GLYPH_RULES){if(r[1].test(t))return r[0];}return "box";}
+/* Resolve an item by id first, then by exact name — receiving lines and old
+   movements only carry the material's name. */
+function invItemBy(ref){if(!ref)return null;const s=String(ref);return (DB.inventory||[]).find(i=>i.id===s)||(DB.inventory||[]).find(i=>(i.name||"").toLowerCase()===s.toLowerCase())||null;}
+/* The one renderer every list uses: photo thumbnail if the item has one
+   (tap to zoom), otherwise its category glyph. Same footprint either way. */
+function itemThumb(ref,size,nameHint){
+  const it=invItemBy(ref);const s=+size||34;
+  const th=it?(DB.itemthumbs||{})[it.id]:null;
+  if(th)return `<img class="ithumb" src="${th}" style="width:${s}px;height:${s}px" onclick="itemImgZoom('${it.id}')" title="${esc(it.name||"")} — tap to view photo" alt="${esc(it.name||"")}">`;
+  const gsrc=it?(((it.category||"")+" "+(it.name||""))):(nameHint||String(ref||""));
+  const g=ITEM_GLYPHS[itemGlyphKey(gsrc)]||ITEM_GLYPHS.box;
+  return `<span class="ithumb ithumb-g" style="width:${s}px;height:${s}px" title="${esc((it&&it.name)||nameHint||"")}">${g}</span>`;
+}
+/* Full-photo lightbox: opens instantly on the cached thumbnail, then swaps in
+   the full-size photo once its own key arrives. Carries the .ui-dialog-overlay
+   class so live repaints hold off while it is open. */
+function itemImgZoom(itemId){
+  const it=(DB.inventory||[]).find(i=>i.id===itemId);
+  const old=document.getElementById("itemZoom");if(old)old.remove();
+  const ov=document.createElement("div");ov.className="ui-dialog-overlay";ov.id="itemZoom";
+  ov.style.cssText="position:fixed;inset:0;background:rgba(22,14,44,.78);z-index:10000;display:flex;align-items:center;justify-content:center;padding:22px;cursor:zoom-out";
+  const meta=[it&&it.category,it?(it.qty+" "+(it.unit||"")+" in stock"):"",it&&it.supplier?("Supplier: "+it.supplier):""].filter(Boolean).join(" · ");
+  ov.innerHTML=`<div style="max-width:min(92vw,760px);text-align:center">
+    <img id="itemZoomImg" src="${(DB.itemthumbs||{})[itemId]||""}" style="max-width:100%;max-height:74vh;border-radius:14px;background:#fff;box-shadow:0 18px 60px rgba(0,0,0,.5)" alt="">
+    <div style="color:#fff;font:700 14px Montserrat,sans-serif;margin-top:12px">${esc(it?it.name:"Item photo")}</div>
+    <div id="itemZoomCap" style="color:#cfc7e4;font-size:12px;margin-top:3px">${esc(meta)}${meta?" · ":""}Loading full photo…</div>
+  </div>`;
+  ov.onclick=()=>ov.remove();
+  document.body.appendChild(ov);
+  loadKey(ITEMIMG_PREFIX+itemId,"").then(full=>{
+    const im=document.getElementById("itemZoomImg"),cap=document.getElementById("itemZoomCap");
+    if(im&&full)im.src=full;
+    if(cap)cap.textContent=meta+(meta?" · ":"")+"Tap anywhere to close";
+  }).catch(()=>{});
+}
+/* --- item form photo picker: stage locally, commit on Save --- */
+let _invImgStage=null; /* null = untouched · {thumb,full} = new photo · "remove" */
+function _invImgShrink(img,max){let w=img.width,h=img.height;if(w>max||h>max){if(w>=h){h=Math.round(h*max/w);w=max;}else{w=Math.round(w*max/h);h=max;}}const cv=document.createElement("canvas");cv.width=w;cv.height=h;const cx=cv.getContext("2d");cx.fillStyle="#fff";cx.fillRect(0,0,w,h);cx.drawImage(img,0,0,w,h);return cv.toDataURL("image/jpeg",0.72);}
+function invPhotoFieldHTML(i){
+  const th=i&&i.id?(DB.itemthumbs||{})[i.id]:null;
+  const prev=th?`<img class="ithumb" src="${th}" style="width:54px;height:54px">`
+             :`<span class="ithumb ithumb-g" style="width:54px;height:54px">${ITEM_GLYPHS[itemGlyphKey(((i&&i.category)||"")+" "+((i&&i.name)||""))]||ITEM_GLYPHS.box}</span>`;
+  return `<div class="fg"><label>Item photo <span style="font-weight:400;color:var(--muted)">(optional — JPEG/PNG, auto-resized to ~50–100 KB)</span></label>
+   <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+     <span id="invPhotoPrev" style="display:inline-flex">${prev}</span>
+     <button type="button" class="btn btn-light" id="invPhotoBtn" style="height:36px">${th?"Replace photo":"Add photo"}</button>
+     <button type="button" class="btn btn-light" id="invPhotoRm" style="height:36px;${th?"":"display:none"}">Remove photo</button>
+     <input type="file" id="invPhotoFile" accept="image/*" style="display:none">
+   </div>
+   <div style="font-size:11px;color:var(--muted);margin-top:4px">Shown beside the item in stock, purchasing and receiving lists. Without a photo the category icon on the left is used.</div></div>`;
+}
+function bindInvPhoto(i){
+  const inp=document.getElementById("invPhotoFile"),btn=document.getElementById("invPhotoBtn"),rm=document.getElementById("invPhotoRm"),prev=document.getElementById("invPhotoPrev");
+  if(!inp||!btn||!rm||!prev)return;
+  _invImgStage=null;
+  const glyph=()=>`<span class="ithumb ithumb-g" style="width:54px;height:54px">${ITEM_GLYPHS[itemGlyphKey(((i&&i.category)||"")+" "+((i&&i.name)||""))]||ITEM_GLYPHS.box}</span>`;
+  btn.onclick=()=>inp.click();
+  rm.onclick=()=>{_invImgStage="remove";prev.innerHTML=glyph();rm.style.display="none";btn.textContent="Add photo";};
+  inp.onchange=e=>{const f=e.target.files&&e.target.files[0];if(!f)return;
+    const r=new FileReader();
+    r.onload=()=>{const img=new Image();
+      img.onload=()=>{try{_invImgStage={thumb:_invImgShrink(img,128),full:_invImgShrink(img,760)};}catch(err){alert("Could not process that image — try a JPEG or PNG.");return;}
+        prev.innerHTML=`<img class="ithumb" src="${_invImgStage.thumb}" style="width:54px;height:54px">`;rm.style.display="";btn.textContent="Replace photo";inp.value="";};
+      img.onerror=()=>alert("That file doesn't look like an image.");
+      img.src=r.result;};
+    r.readAsDataURL(f);};
+}
+async function commitItemImage(itemId){
+  if(!_invImgStage||!itemId)return;
+  const stage=_invImgStage;_invImgStage=null;
+  /* refresh-before-write: two keepers photographing different items at the
+     same time must not clobber each other's entries in the shared map. */
+  DB.itemthumbs=await loadKey(K.itemthumbs,DB.itemthumbs||{})||{};
+  if(stage==="remove"){
+    if(DB.itemthumbs[itemId]!==undefined){delete DB.itemthumbs[itemId];await saveKey(K.itemthumbs,DB.itemthumbs);}
+    try{await window.storage.delete(ITEMIMG_PREFIX+itemId,true);}catch(e){}
+  }else{
+    await saveKey(ITEMIMG_PREFIX+itemId,stage.full); /* full first — the thumb only points at it once it exists */
+    DB.itemthumbs[itemId]=stage.thumb;
+    await saveKey(K.itemthumbs,DB.itemthumbs);
+  }
 }
 function viewInventory(){
   const invTabBar=`<div style="margin-bottom:14px"><button class="btn ${invTab==='stock'?'btn-primary':'btn-out'}" onclick="invTab='stock';viewInventory()" style="margin-right:6px">Inventory &amp; Stock</button><button class="btn ${invTab==='recv'?'btn-primary':'btn-out'}" onclick="invTab='recv';viewInventory()" style="margin-right:6px">Material Receiving</button><button class="btn ${invTab==='tools'?'btn-primary':'btn-out'}" onclick="invTab='tools';viewInventory()" style="margin-right:6px">Tool Issuance</button><button class="btn ${invTab==='sales'?'btn-primary':'btn-out'}" onclick="invTab='sales';viewInventory()" style="margin-right:6px">Sales summary</button><button class="btn ${invTab==='bom'?'btn-primary':'btn-out'}" onclick="invTab='bom';viewInventory()">BOM stock check</button></div>`;
@@ -4257,7 +4385,7 @@ function viewInventory(){
      ${can("inventory.edit")?'<button class="btn btn-primary" id="addInv">+ Add item</button>':''}</div></div>
    ${list.length?`<div style="overflow-x:auto"><table><thead><tr><th>Item</th><th>Category</th><th>In stock</th><th>Reorder at</th><th>Unit cost</th><th></th></tr></thead><tbody>
    ${list.map(i=>{const out=(+i.qty||0)<=0;const lowf=!out&&i.qty<=i.reorder;const key=esc(((i.name||"")+" "+(i.sku||"")+" "+(i.category||"")+" "+(i.supplier||"")).toLowerCase());return `<tr data-search="${key}" data-focus="${i.id}">
-     <td><b>${esc(i.name)}</b><div style="font-size:11px;color:var(--muted)">${[i.sku,i.supplier].filter(Boolean).map(esc).join(" · ")}</div></td>
+     <td><div style="display:flex;align-items:center;gap:10px">${itemThumb(i.id,34)}<div><b>${esc(i.name)}</b><div style="font-size:11px;color:var(--muted)">${[i.sku,i.supplier].filter(Boolean).map(esc).join(" · ")}</div></div></div></td>
      <td>${esc(i.category)}</td>
      <td><b style="color:${(out||lowf)?'var(--red)':'var(--ink)'}">${i.qty}</b> ${esc(i.unit||"")} ${out?'<span class="tag t-rejected">Out of stock</span>':lowf?'<span class="tag t-proposal">Low</span>':'<span class="tag t-active">In stock</span>'}</td>
      <td>${i.reorder}</td><td>${peso(i.cost)}</td>
@@ -4290,12 +4418,15 @@ function invForm(id,defCat){
    <div class="fg"><label>In stock</label><input id="f_iqty" type="number" value="${i.qty}"></div>
    <div class="fg"><label>Reorder at</label><input id="f_ireorder" type="number" value="${i.reorder}"></div></div>
    <div class="fg"><label>Supplier (primary)</label><input id="f_isup" value="${esc(i.supplier)}"></div>
+   ${invPhotoFieldHTML(i)}
    <div id="supHint" style="font-size:11px;color:var(--brand);margin-top:-4px">${(()=>{const ss=suppliersForCat(i.category).map(s=>s.name);return ss.length?("Suppliers carrying "+esc(i.category)+": "+ss.map(esc).join(", ")):"";})()}</div>`,
    [["Cancel","btn-out",closeModal],["Save","btn-primary",async()=>{const name=gv("f_iname").trim();if(!name){alert("Name required.");return;}
      const d={category:gv("f_icat").trim(),name,sku:gv("f_isku").trim(),unit:gv("f_iunit"),cost:+gv("f_icost")||0,qty:+gv("f_iqty")||0,reorder:+gv("f_ireorder")||0,supplier:gv("f_isup")};
-     if(id){Object.assign(i,d);await logAudit("update","inventory",name,"Edited item");}else{DB.inventory.push({id:uid(),...d});await logAudit("create","inventory",name,"Added item");}
+     const nid=id||uid();
+     if(id){Object.assign(i,d);await logAudit("update","inventory",name,"Edited item");}else{DB.inventory.push({id:nid,...d});await logAudit("create","inventory",name,"Added item");}
      if(d.category&&(DB.invcats||[]).indexOf(d.category)<0){DB.invcats.push(d.category);await saveKey(K.invcats,DB.invcats);}
-     await saveKey(K.inv,DB.inventory);buildNav();closeModal();if(d.category)invCat=d.category;viewInventory();}]]);
+     await saveKey(K.inv,DB.inventory);await commitItemImage(nid);buildNav();closeModal();if(d.category)invCat=d.category;viewInventory();}]]);
+  bindInvPhoto(i);
 }
 function restockForm(id){
   const i=DB.inventory.find(x=>x.id===id);if(!i)return;
@@ -4305,7 +4436,10 @@ function restockForm(id){
      i.qty+=add;await saveKey(K.inv,DB.inventory);await recordMove(i.id,i.name,add,"Restock");await logAudit("stock-in","inventory",i.name,`+${add} received`);buildNav();closeModal();viewInventory();}]]);
 }
 async function delInv(id){const i=DB.inventory.find(x=>x.id===id);if(!i)return;if(!await uiConfirm(`Delete "${i.name}"?`))return;
-  DB.inventory=DB.inventory.filter(x=>x.id!==id);await saveKey(K.inv,DB.inventory);await logAudit("delete","inventory",i.name,"Deleted");buildNav();viewInventory();}
+  DB.inventory=DB.inventory.filter(x=>x.id!==id);await saveKey(K.inv,DB.inventory);
+  /* clean up the item's photo so the thumbs map and per-item key don't orphan */
+  if((DB.itemthumbs||{})[id]!==undefined){DB.itemthumbs=await loadKey(K.itemthumbs,DB.itemthumbs||{})||{};delete DB.itemthumbs[id];await saveKey(K.itemthumbs,DB.itemthumbs);try{await window.storage.delete(ITEMIMG_PREFIX+id,true);}catch(e){}}
+  await logAudit("delete","inventory",i.name,"Deleted");buildNav();viewInventory();}
 
 /* ============ MATERIAL RECEIVING ============
    One report per delivery — replaces the workbook's 42 per-client tabs. Each report
@@ -4409,7 +4543,7 @@ async function postReceiptToStock(r){
 }
 function recvView(id){
   const r=(DB.receiving||[]).find(x=>x.id===id);if(!r)return;
-  const rows=(r.lines||[]).map((l,i)=>`<tr><td style="color:var(--muted)">${i+1}</td><td style="white-space:nowrap">${+l.qty||0} ${esc(l.unit||"")}</td><td>${esc(l.item)}</td><td style="color:#555">${esc(l.supplier||"")}</td><td style="text-align:right">${peso(l.unitPrice)}</td><td style="text-align:right;font-weight:600">${peso((+l.qty||0)*(+l.unitPrice||0))}</td></tr>`).join("");
+  const rows=(r.lines||[]).map((l,i)=>`<tr><td style="color:var(--muted)">${i+1}</td><td style="white-space:nowrap">${+l.qty||0} ${esc(l.unit||"")}</td><td><div style="display:flex;align-items:center;gap:8px">${itemThumb(l.item,26,l.item)}<span>${esc(l.item)}</span></div></td><td style="color:#555">${esc(l.supplier||"")}</td><td style="text-align:right">${peso(l.unitPrice)}</td><td style="text-align:right;font-weight:600">${peso((+l.qty||0)*(+l.unitPrice||0))}</td></tr>`).join("");
   openModal("Material receiving — "+esc(r.no||""),
    `<div style="display:flex;flex-wrap:wrap;gap:8px 22px;font-size:12px;margin-bottom:10px">
      <div><span style="color:var(--muted)">Client / Project:</span> <b>${esc(r.clientName||"—")}</b></div>
@@ -8186,7 +8320,7 @@ function showMovements(){
   const bal=ioBalanceMap();
   openModal("Stock movements (ledger)",`<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Every stock change is recorded as + (in) or − (out), so quantities are always reconcilable.</div>
    ${ms.length?`<table><thead><tr><th>When</th><th>Item</th><th>Change</th><th style="text-align:right" title="Stock on hand right after this entry">Remaining</th><th>Reason</th><th>By</th></tr></thead><tbody>
-   ${ms.map(m=>`<tr><td style="font-size:11px">${new Date(m.ts).toLocaleString()}</td><td>${esc(m.name)}</td>
+   ${ms.map(m=>`<tr><td style="font-size:11px">${new Date(m.ts).toLocaleString()}</td><td><div style="display:flex;align-items:center;gap:8px">${itemThumb(m.itemId||m.name,24,m.name)}<span>${esc(m.name)}</span></div></td>
      <td style="font-weight:700;color:${m.change>=0?'var(--ok)':'var(--red)'}">${m.change>=0?'+':''}${m.change}</td>
      <td style="text-align:right;white-space:nowrap">${ioRemainCell(m,bal)}</td><td>${esc(m.reason)}</td><td>${esc(m.by)}</td></tr>`).join("")}
    </tbody></table>`:'<div class="empty">No movements recorded yet.</div>'}`,[["Close","btn-light",closeModal]]);
@@ -8313,7 +8447,7 @@ function showInOut(){
    ${rows.length?`<div style="overflow-x:auto"><table><thead><tr><th>Date</th><th>Dir</th><th>Material</th><th style="text-align:right">Qty</th><th style="text-align:right" title="Stock on hand right after this entry">Remaining</th><th style="text-align:right">Unit price</th><th style="text-align:right">Amount</th><th>Assigned to</th><th>Handled by</th><th>Project</th><th>Logged by</th>${canEdit?"<th></th>":""}</tr></thead><tbody>
    ${rows.map(m=>`<tr><td style="white-space:nowrap">${esc(m.date||(m.ts||"").slice(0,10))}</td>
      <td><span class="tag ${m.dir==="In"?"t-won":"t-rejected"}">${esc(m.dir||"")}</span>${m.dir==="Out"?(m.outType==="internal"?'<div style="font-size:9px;color:#888">internal</div>':'<div style="font-size:9px;color:var(--ok)">sold</div>'):''}</td>
-     <td><b>${esc(m.name)}</b></td><td style="text-align:right">${m.qty}</td>
+     <td><div style="display:flex;align-items:center;gap:8px">${itemThumb(m.itemId||m.name,26,m.name)}<b>${esc(m.name)}</b></div></td><td style="text-align:right">${m.qty}</td>
      <td style="text-align:right;white-space:nowrap">${ioRemainCell(m,bal)}</td>
      <td style="text-align:right">${m.unitPrice!=null&&m.unitPrice!==""?peso(m.unitPrice):"—"}</td>
      <td style="text-align:right">${m.amount!=null&&m.amount!==""?peso(m.amount):"—"}</td>
@@ -8487,7 +8621,7 @@ function poFromProc(){
   const pr=DB.projects.find(p=>p.id===procProj);if(!pr){alert("Select a project first.");return;}
   const lines=(pr.materials||[]).map((m,idx)=>({m,idx})).filter(x=>(x.m.status||"")==="For P.O");
   if(!lines.length){alert('No lines are marked "For P.O" on this project.');return;}
-  const rowsHtml=lines.map(x=>{const m=x.m;const it=DB.inventory.find(i=>i.id===m.itemId);const name=m.name||(it?it.name:"(item)");const cost=(m.cost!=null&&m.cost!=="")?+m.cost:(it?it.cost:0);return `<tr><td>${esc(name)}${it?"":' <span class="ppill" style="color:#6f2c8f;background:#f1ecfa">custom</span>'}</td><td style="width:80px"><input type="number" min="0" value="${m.qty||0}" data-pq="${x.idx}" style="width:74px;padding:6px;border:1px solid var(--line);border-radius:6px"></td><td style="width:104px"><input type="number" value="${cost}" data-pc="${x.idx}" style="width:96px;padding:6px;border:1px solid var(--line);border-radius:6px"></td></tr>`;}).join("");
+  const rowsHtml=lines.map(x=>{const m=x.m;const it=DB.inventory.find(i=>i.id===m.itemId);const name=m.name||(it?it.name:"(item)");const cost=(m.cost!=null&&m.cost!=="")?+m.cost:(it?it.cost:0);return `<tr><td><div style="display:flex;align-items:center;gap:8px">${itemThumb(m.itemId||name,26,name)}<span>${esc(name)}${it?"":' <span class="ppill" style="color:#6f2c8f;background:#f1ecfa">custom</span>'}</span></div></td><td style="width:80px"><input type="number" min="0" value="${m.qty||0}" data-pq="${x.idx}" style="width:74px;padding:6px;border:1px solid var(--line);border-radius:6px"></td><td style="width:104px"><input type="number" value="${cost}" data-pc="${x.idx}" style="width:96px;padding:6px;border:1px solid var(--line);border-radius:6px"></td></tr>`;}).join("");
   openModal("Create PO from \u201CFor P.O\u201D lines",`<div class="fg"><label>Supplier</label><select id="f_posup2"><option value="">— Select supplier —</option>${DB.suppliers.map(s=>`<option>${esc(s.name)}</option>`).join("")}</select></div>
     <div style="font-size:12px;color:var(--muted);margin:4px 0 6px">Lines marked <b>For P.O</b> for <b>${esc(pr.name)}</b>. Creating the PO sends it for <b>GM approval</b> and moves these lines to <b>P.O / On Done</b>.</div>
     <div style="max-height:260px;overflow:auto"><table><thead><tr><th>Item</th><th>Qty</th><th>Unit cost</th></tr></thead><tbody>${rowsHtml}</tbody></table></div>`,
@@ -8638,7 +8772,7 @@ function viewPurchaseRequests(tabBar){
 function _prItemCard(it,i){
   const onHand=prOnHand(it);
   return `<div class="pritem" data-pi="${i}" style="border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px;background:#faf9fd">
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><b style="font-size:12px;color:var(--brand)">${esc(it.name)}</b><button type="button" class="icobtn del" data-pdelitem="${i}">Remove</button></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px"><span style="display:inline-flex;align-items:center;gap:8px">${itemThumb(it.itemId||it.name,26,it.name)}<b style="font-size:12px;color:var(--brand)">${esc(it.name)}</b></span><button type="button" class="icobtn del" data-pdelitem="${i}">Remove</button></div>
     <div class="grid2"><div class="fg"><label>Qty requested (${esc(it.unit||"pcs")})</label><input type="number" min="0" step="0.01" data-pf="qtyRequested" value="${it.qtyRequested||0}"></div>
       <div class="fg"><label>In stock now</label><input value="${onHand} ${esc(it.unit||"pcs")}" disabled></div></div>
     <div class="fg"><label>Note (optional)</label><input data-pf="note" value="${esc(it.note||"")}" placeholder="e.g. for roof array section A"></div>
@@ -8711,7 +8845,7 @@ function prStockCheck(id){
   const totalBuy=rows.reduce((s,r)=>s+r.buy,0), totalEst=rows.reduce((s,r)=>s+r.est,0);
   const body=`<div style="font-size:12px;color:var(--muted);margin-bottom:8px">Project: <b>${esc(p.projectName||"—")}</b> · ${esc(p.prNo)} · ${prTag(p.status)}</div>
     <div style="overflow-x:auto"><table><thead><tr><th>Item</th><th class="ctr">Requested</th><th class="ctr">In stock</th><th class="ctr">From stock</th><th class="ctr">To buy</th><th class="num">Est. cost</th></tr></thead><tbody>
-    ${rows.map(r=>`<tr><td><b>${esc(r.it.name)}</b>${r.it.note?`<div style="font-size:11px;color:var(--muted)">${esc(r.it.note)}</div>`:""}</td>
+    ${rows.map(r=>`<tr><td><div style="display:flex;align-items:center;gap:8px">${itemThumb(r.it.itemId||r.it.name,26,r.it.name)}<span><b>${esc(r.it.name)}</b>${r.it.note?`<div style="font-size:11px;color:var(--muted)">${esc(r.it.note)}</div>`:""}</span></div></td>
       <td class="ctr">${r.it.qtyRequested} ${esc(r.it.unit||"")}</td>
       <td class="ctr">${r.onHand}</td>
       <td class="ctr" style="color:var(--ok)">${r.fromStock}</td>
@@ -8758,7 +8892,7 @@ function viewPurchasing(){
   const PSTAT=["For P.O","P.O / On Done","OK / On Done","OK Done","From Stocks / On Done"];
   const pStatBg=s=>({"For P.O":"#fff3e0","P.O / On Done":"#fff3e0","OK / On Done":"#e7f7ee","OK Done":"#e7f7ee","From Stocks / On Done":"#e7f0fd"}[s]||"#fff");
   const pStatFg=s=>({"For P.O":"#b06a00","P.O / On Done":"#b06a00","OK / On Done":"#1c7c4a","OK Done":"#1c7c4a","From Stocks / On Done":"#1d6fd0"}[s]||"#555");
-  const procR=((proj&&proj.materials)||[]).map((m,idx)=>{const it=DB.inventory.find(i=>i.id===m.itemId);if(!it&&!m.custom&&!m.name)return null;const name=m.name||(it?it.name:"(item)");const unit=m.unit||(it?it.unit:"pcs");const supplier=m.supplier||(it?it.supplier:"")||"\u2014";const cost=(m.cost!=null&&m.cost!=="")?+m.cost:(it?+it.cost||0:0);const total=cost*(+m.qty||0);const inStock=it?((+it.qty||0)>=(+m.qty||0)):false;const status=m.status||(inStock?"From Stocks / On Done":"For P.O");return {idx,name,unit,supplier,cost,qty:m.qty,total,status,dateOrdered:m.dateOrdered||"",lalamove:+m.lalamove||0,remarks:m.remarks||"",custom:!!m.custom||!it,section:bomSectionOf(m,it),sub:m.sub||""};}).filter(Boolean);
+  const procR=((proj&&proj.materials)||[]).map((m,idx)=>{const it=DB.inventory.find(i=>i.id===m.itemId);if(!it&&!m.custom&&!m.name)return null;const name=m.name||(it?it.name:"(item)");const unit=m.unit||(it?it.unit:"pcs");const supplier=m.supplier||(it?it.supplier:"")||"\u2014";const cost=(m.cost!=null&&m.cost!=="")?+m.cost:(it?+it.cost||0:0);const total=cost*(+m.qty||0);const inStock=it?((+it.qty||0)>=(+m.qty||0)):false;const status=m.status||(inStock?"From Stocks / On Done":"For P.O");return {idx,itemId:m.itemId||"",name,unit,supplier,cost,qty:m.qty,total,status,dateOrdered:m.dateOrdered||"",lalamove:+m.lalamove||0,remarks:m.remarks||"",custom:!!m.custom||!it,section:bomSectionOf(m,it),sub:m.sub||""};}).filter(Boolean);
   const procBySection=()=>{const out=BOM_SECTIONS.map(s=>({k:s.k,t:s.t,rows:procR.filter(r=>r.section===s.k)})).filter(g=>g.rows.length);return out.map(g=>`<tr class="bom-sec"><td colspan="11">${esc(g.t)}</td></tr>`+g.rows.map(procRow).join("")).join("");};
   const matTotal=procR.reduce((s,r)=>s+r.total,0);
   const lalaTotal=procR.reduce((s,r)=>s+r.lalamove,0);
@@ -8767,7 +8901,7 @@ function viewPurchasing(){
   const forPOn=stCounts["For P.O"]||0;
   const procStrip=procR.length?`<div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center;justify-content:space-between;margin:2px 0 12px"><div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">${PSTAT.map(s=>`<span class="ppill" style="color:${pStatFg(s)};background:${pStatBg(s)}">${esc(s)}: ${stCounts[s]||0}</span>`).join("")}</div>${(canEditProc&&forPOn)?`<button class="btn btn-primary" id="poFromProc" style="height:30px">Create PO from ${forPOn} “For P.O” line${forPOn>1?"s":""}</button>`:'<span style="font-size:12px;color:var(--ok)">✓ No lines pending P.O</span>'}</div>`:"";
   const procRow=r=>`<tr>
-     <td class="ctr">${r.qty}</td><td>${esc(r.unit||"pcs")}</td><td><b>${esc(r.name)}</b>${r.custom?' <span class="ppill" style="color:#6f2c8f;background:#f1ecfa">custom</span>':''}${r.sub?` <span class="bom-flag">${esc(r.sub)}</span>`:''}</td><td>${esc(r.supplier||"—")}</td>
+     <td class="ctr">${r.qty}</td><td>${esc(r.unit||"pcs")}</td><td><div style="display:flex;align-items:center;gap:8px">${itemThumb(r.itemId||r.name,28,r.name)}<span><b>${esc(r.name)}</b>${r.custom?' <span class="ppill" style="color:#6f2c8f;background:#f1ecfa">custom</span>':''}${r.sub?` <span class="bom-flag">${esc(r.sub)}</span>`:''}</span></div></td><td>${esc(r.supplier||"—")}</td>
      <td>${canEditProc?`<select class="procIn" data-idx="${r.idx}" data-f="status" style="color:${pStatFg(r.status)};background:${pStatBg(r.status)}">${PSTAT.map(o=>`<option ${o===r.status?"selected":""}>${o}</option>`).join("")}</select>`:`<span class="ppill" style="color:${pStatFg(r.status)};background:${pStatBg(r.status)}">${esc(r.status)}</span>`}</td>
      <td class="ctr">${canEditProc?`<input type="date" class="procIn" data-idx="${r.idx}" data-f="dateOrdered" value="${r.dateOrdered}">`:(r.dateOrdered?esc(r.dateOrdered):'<span style="color:var(--muted)">—</span>')}</td>
      <td class="num">${canEditProc?`<input type="number" min="0" step="0.01" class="procIn" data-idx="${r.idx}" data-f="cost" value="${r.cost}" title="Unit price — flows to the project BOM and to Accounting COGS">`:peso(r.cost)}</td><td class="num" style="font-weight:700">${peso(r.total)}</td>
@@ -8926,7 +9060,7 @@ function poLinesRender(){
   box.innerHTML=`<div style="overflow-x:auto"><table style="width:100%"><thead><tr><th style="width:28px">#</th><th>Item &amp; Description</th><th style="width:92px;text-align:center">Qty</th><th style="width:116px">Unit</th><th style="width:120px;text-align:right">Unit price</th><th style="width:120px;text-align:right">Amount</th><th style="width:34px"></th></tr></thead><tbody>
    ${_poLines.map((l,i)=>`<tr>
      <td style="text-align:center;color:#888">${i+1}</td>
-     <td><input list="poItemsDL" data-i="${i}" data-f="name" value="${esc(l.name||"")}" placeholder="Type or pick item…" style="width:100%;min-width:150px;padding:6px;border:1px solid var(--line);border-radius:6px"></td>
+     <td><div style="display:flex;align-items:center;gap:6px"><span id="poth_${i}" style="display:inline-flex">${itemThumb(l.itemId||l.name,26,l.name)}</span><input list="poItemsDL" data-i="${i}" data-f="name" value="${esc(l.name||"")}" placeholder="Type or pick item…" style="flex:1;min-width:150px;padding:6px;border:1px solid var(--line);border-radius:6px"></div></td>
      <td><input type="number" min="0" step="any" data-i="${i}" data-f="qty" value="${l.qty!=null?l.qty:""}" style="width:100%;min-width:80px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;text-align:center;font-size:14px;font-weight:600"></td>
      <td><select data-i="${i}" data-f="unit" style="width:100%;min-width:96px;padding:6px 26px 6px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;background:#fff;-webkit-appearance:none;-moz-appearance:none;appearance:none;background-image:url(&quot;data:image/svg+xml;charset=US-ASCII,%3Csvg%20xmlns%3D%27http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%27%20width%3D%2710%27%20height%3D%276%27%20viewBox%3D%270%200%2010%206%27%3E%3Cpath%20fill%3D%27%23888%27%20d%3D%27M0%200l5%206%205-6z%27%2F%3E%3C%2Fsvg%3E&quot;);background-repeat:no-repeat;background-position:right 9px center">${PO_UNITS.map(u=>`<option ${(l.unit||"pc(s)")===u?"selected":""}>${u}</option>`).join("")}</select></td>
      <td><input type="number" min="0" step="0.01" data-i="${i}" data-f="price" value="${l.price!=null?l.price:""}" style="width:100%;min-width:100px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;text-align:right;font-size:13px"></td>
@@ -8937,7 +9071,7 @@ function poLinesRender(){
   box.querySelectorAll("input,select").forEach(el=>{
     const i=+el.dataset.i,f=el.dataset.f;if(isNaN(i))return;
     el.oninput=el.onchange=()=>{
-      if(f==="name"){_poLines[i].name=el.value;const it=DB.inventory.find(x=>(x.name||"").toLowerCase()===el.value.trim().toLowerCase());if(it){_poLines[i].itemId=it.id;const ue=box.querySelector('[data-i="'+i+'"][data-f="unit"]');if(ue&&it.unit&&PO_UNITS.includes(it.unit)){ue.value=it.unit;_poLines[i].unit=it.unit;}const pe=box.querySelector('[data-i="'+i+'"][data-f="price"]');if(pe&&!pe.value&&it.cost){pe.value=it.cost;_poLines[i].price=+it.cost||0;}}else{_poLines[i].itemId="";}}
+      if(f==="name"){_poLines[i].name=el.value;const it=DB.inventory.find(x=>(x.name||"").toLowerCase()===el.value.trim().toLowerCase());if(it){_poLines[i].itemId=it.id;const ue=box.querySelector('[data-i="'+i+'"][data-f="unit"]');if(ue&&it.unit&&PO_UNITS.includes(it.unit)){ue.value=it.unit;_poLines[i].unit=it.unit;}const pe=box.querySelector('[data-i="'+i+'"][data-f="price"]');if(pe&&!pe.value&&it.cost){pe.value=it.cost;_poLines[i].price=+it.cost||0;}}else{_poLines[i].itemId="";}const tw=document.getElementById("poth_"+i);if(tw)tw.innerHTML=itemThumb(_poLines[i].itemId||el.value,26,el.value);}
       else if(f==="qty")_poLines[i].qty=el.value===""?"":(+el.value||0);
       else if(f==="price")_poLines[i].price=el.value===""?"":(+el.value||0);
       else _poLines[i][f]=el.value;
@@ -10193,7 +10327,8 @@ function stockCardView(itemId){
       <td style="text-align:right;font-weight:800">${run}</td></tr>`;}).join("");
   const lowf=(+it.qty||0)<=(+it.reorder||0);
   openModal("Stock card — "+esc(it.name),
-   `<div style="display:flex;flex-wrap:wrap;gap:10px 22px;font-size:12px;margin-bottom:10px">
+   `<div style="display:flex;flex-wrap:wrap;align-items:center;gap:10px 22px;font-size:12px;margin-bottom:10px">
+     ${itemThumb(it.id,44)}
      <div><span style="color:var(--muted)">Category:</span> <b>${esc(it.category||"—")}</b></div>
      <div><span style="color:var(--muted)">On hand:</span> <b style="color:${lowf?'var(--red)':'var(--ink)'}">${it.qty} ${esc(it.unit||"")}</b>${lowf?' <span class="tag t-rejected">LOW</span>':''}</div>
      <div><span style="color:var(--muted)">Re-order at:</span> <b>${it.reorder}</b></div>
