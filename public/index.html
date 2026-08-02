@@ -568,6 +568,14 @@
   .fg textarea{min-height:70px;resize:vertical}
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .grid3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+  /* Balance: a label that wraps to two lines must never push its field out of
+     line with the rest of the row — grid cells bottom-align their controls,
+     so the extra label height is absorbed at the top, not the bottom. Exception:
+     rows where a cell carries hint text BELOW its control keep the classic top
+     alignment (bottom-aligning would drag the neighbors down to the hint line). */
+  .grid2>.fg,.grid3>.fg{display:flex;flex-direction:column;justify-content:flex-end}
+  .grid2:has(.fg :is(input,select,textarea)~*:not(datalist))>.fg,
+  .grid3:has(.fg :is(input,select,textarea)~*:not(datalist))>.fg{justify-content:flex-start}
   .notice{background:#fff7e0;border:1px solid #f0d98a;color:#7a5b00;font-size:12px;padding:10px 14px;border-radius:10px;margin-bottom:16px;line-height:1.5}
   /* Hierarchy: section labels are wayfinding, not content — quiet and small
      so the data below them always reads first. */
@@ -3037,12 +3045,66 @@ function viewClients(){
   {const _b=document.getElementById("cliArchBtn");if(_b)_b.onclick=()=>showArchived("client");}
   V().querySelectorAll("[data-prop]").forEach(b=>b.onclick=()=>{const c=DB.clients.find(x=>x.id===b.dataset.prop);proposalEditor(null,c);});
 }
+/* ===== Google Maps pin capture =====
+   One widget for every "Pin location" field: paste a share link as before, OR
+   tap "📍 My location" to capture the device GPS as a plain Google Maps pin
+   link (https://www.google.com/maps?q=lat,lng — opens a pin in any browser or
+   the Maps app, no API key needed). "Open" verifies the pin before saving, or
+   searches the typed address when no pin is set yet. Geolocation needs a
+   secure origin: works on the HTTPS cloud site and on localhost, NOT on the
+   plain-http LAN address — the error message says so instead of failing dumb. */
+function pinFieldHTML(pid,val){
+  return `<div class="fg"><label>Pin location (Google Maps)</label>
+   <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+     <input id="${pid}" value="${esc(val||"")}" placeholder="https://maps.app.goo.gl/… or tap 📍" style="flex:1;min-width:150px;width:auto">
+     <button type="button" class="btn btn-light" id="${pid}Geo" style="height:38px;white-space:nowrap">📍 My location</button>
+     <button type="button" class="btn btn-light" id="${pid}Open" style="height:38px">Open</button>
+   </div>
+   <div id="${pid}Stat" style="font-size:11px;color:var(--muted);margin-top:4px">Paste a Google Maps share link — or tap <b>📍 My location</b> while standing at the site to capture the exact pin.</div></div>`;
+}
+function wirePinField(pid,getAddr){
+  const inp=document.getElementById(pid),geo=document.getElementById(pid+"Geo"),op=document.getElementById(pid+"Open"),st=document.getElementById(pid+"Stat");
+  if(!inp)return;
+  const say=(msg,tone)=>{if(st){st.textContent=msg;st.style.color=tone==="ok"?"var(--ok)":tone==="warn"?"var(--red)":"var(--muted)";}};
+  if(op)op.onclick=()=>{
+    const v=(inp.value||"").trim(),addr=getAddr?String(getAddr()||"").trim():"";
+    if(!v&&!addr){alert("Paste a Google Maps link, or type the address first — Open then shows it on the map.");return;}
+    const u=v?(/^https?:\/\//i.test(v)?v:"https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(v))
+             :"https://www.google.com/maps/search/?api=1&query="+encodeURIComponent(addr);
+    window.open(u,"_blank","noopener");
+  };
+  if(geo)geo.onclick=()=>{
+    if(!navigator.geolocation){
+      say("Location isn't available on this connection — open the HTTPS site (gleenergy-erp.onrender.com) and allow Location.","warn");
+      return;
+    }
+    say("Getting GPS fix — allow Location if your phone asks…");geo.disabled=true;
+    navigator.geolocation.getCurrentPosition(p=>{
+      geo.disabled=false;
+      const lat=+p.coords.latitude.toFixed(6),lng=+p.coords.longitude.toFixed(6),acc=Math.round(p.coords.accuracy||0);
+      inp.value="https://www.google.com/maps?q="+lat+","+lng;
+      say("Pin captured at "+lat+", "+lng+(acc?" · accuracy ±"+acc+" m":"")+" — tap Open to double-check before saving.","ok");
+    },err=>{
+      geo.disabled=false;
+      say(err&&err.code===1?"Location permission was denied — allow Location for this site in your browser settings (on the office LAN address, use the HTTPS cloud site instead), then try again."
+         :err&&err.code===3?"GPS timed out — step outside or near a window and tap 📍 again."
+         :"Could not get a GPS fix — check that Location is switched on, then try again.","warn");
+    },{enableHighAccuracy:true,timeout:15000,maximumAge:30000});
+  };
+}
+/* Map embed for a saved pin: exact coordinates when the pin is a q=lat,lng
+   link (what "📍 My location" produces), else the typed address. */
+function pinEmbedSrc(pinUrl,address){
+  const m=String(pinUrl||"").match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/);
+  if(m)return "https://maps.google.com/maps?q="+m[1]+","+m[2]+"&output=embed";
+  return address?("https://maps.google.com/maps?q="+encodeURIComponent(address)+"&output=embed"):"";
+}
 function clientView(id){const c=DB.clients.find(x=>x.id===id);if(!c)return;
   openModal("Client details",`<div class="fg"><label>Name</label><div>${esc(c.name)}</div></div>
   <div class="grid2"><div class="fg"><label>Phone</label><div>${esc(c.phone||"—")}</div></div><div class="fg"><label>Email</label><div>${esc(c.email||"—")}</div></div></div>
   <div class="fg"><label>Address</label><div>${esc(c.address||"—")}</div></div>
   ${c.pinUrl?`<div class="fg"><label>Pin location</label><a href="${esc(c.pinUrl)}" target="_blank" rel="noopener" style="color:var(--brand);font-weight:600;text-decoration:none;word-break:break-all">📍 ${esc(c.pinUrl)}</a></div>`:""}
-  ${(c.pinUrl||c.address)?`<div class="fg"><label>Location</label>${c.pinUrl?"":`<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}" target="_blank" rel="noopener" style="color:var(--brand);font-weight:600;text-decoration:none">📍 Open in Google Maps</a>`}${c.address?`<iframe src="https://maps.google.com/maps?q=${encodeURIComponent(c.address)}&output=embed" style="width:100%;height:210px;border:1px solid var(--line);border-radius:8px;margin-top:6px" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>`:""}</div>`:""}
+  ${(c.pinUrl||c.address)?`<div class="fg"><label>Location</label>${c.pinUrl?"":`<a href="https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(c.address)}" target="_blank" rel="noopener" style="color:var(--brand);font-weight:600;text-decoration:none">📍 Open in Google Maps</a>`}${(()=>{const _src=pinEmbedSrc(c.pinUrl,c.address);return _src?`<iframe src="${_src}" style="width:100%;height:210px;border:1px solid var(--line);border-radius:8px;margin-top:6px" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>`:"";})()}</div>`:""}
   <div class="grid2"><div class="fg"><label>Source</label><div>${esc(c.source||"—")}</div></div><div class="fg"><label>Stage</label><div>${esc(c.stage)}</div></div></div>
   <div class="grid2"><div class="fg"><label>Preferred system</label><div>${esc(c.preferredSystem||"—")}</div></div><div class="fg"><label>Roof type</label><div>${esc(c.roofType||"—")}</div></div></div>
   <div class="grid2"><div class="fg"><label>Site visit</label><div>${esc(c.siteVisit||"—")}</div></div><div class="fg"><label>Monthly bill</label><div>${c.monthlyBill?peso(c.monthlyBill):"—"}</div></div></div>
@@ -3070,7 +3132,7 @@ function clientForm(id){
   <div class="grid2"><div class="fg"><label>Contact person <span style="font-weight:400;color:var(--muted)">(if different from the client)</span></label><input id="f_cperson" value="${esc(c.contactPerson||"")}" placeholder="e.g. site caretaker, spouse"></div>
   <div class="fg"><label>Contact person's number</label><input id="f_cphone" value="${esc(c.contactPhone||"")}"></div></div>
   <div class="fg"><label>Address</label><input id="f_address" value="${esc(c.address)}"></div>
-  <div class="fg"><label>Pin location (Google Maps URL)</label><input id="f_pin" value="${esc(c.pinUrl||"")}" placeholder="https://maps.app.goo.gl/…"></div>
+  ${pinFieldHTML("f_pin",c.pinUrl)}
   <div class="grid3"><div class="fg"><label>Source</label><input id="f_source" value="${esc(c.source)}"></div>
   <div class="fg"><label>Stage</label><select id="f_stage">${stages.map(s=>`<option ${c.stage===s?"selected":""}>${s}</option>`).join("")}</select></div>
   <div class="fg"><label>Client type <span style="font-size:10px;color:var(--muted)">(payment terms)</span></label><select id="f_ctype">${["Standard","New client"].map(t=>`<option ${((c.clientType||"Standard")===t)?"selected":""}>${t}</option>`).join("")}</select></div></div>
@@ -3088,6 +3150,7 @@ function clientForm(id){
     if(d.stage==="For Engineering follow-up"){ d.engStageAt=(id&&c.stage==="For Engineering follow-up"&&c.engStageAt)?c.engStageAt:todayStr(); } else { d.engStageAt=""; }
     if(id){Object.assign(c,d);await logAudit("update","client",name,"Edited");}else{DB.clients.unshift({id:uid(),createdAt:todayStr(),...d});await logAudit("create","client",name,"Added");}
     await saveKey(K.cli,DB.clients);closeModal();viewClients();}]]);
+  wirePinField("f_pin",()=>gv("f_address"));
 }
 function delClient(id){archiveRec("client",id);}
 
@@ -6718,7 +6781,7 @@ async function surveyForm(id){
    <div class="grid2"><div class="fg"><label>Client name (printed)</label><input id="sv_cname" value="${esc(cur.clientName)}"></div>
      <div class="fg"><label>Survey date</label><input id="sv_date" type="date" value="${esc(cur.date)}"></div></div>
    <div class="fg"><label>Address</label><input id="sv_addr" value="${esc(cur.address)}"></div>
-   <div class="grid2"><div class="fg"><label>Pin location (Google Maps URL)</label><input id="sv_pin" value="${esc(cur.pinUrl)}" placeholder="https://maps.app.goo.gl/…"></div>
+   <div class="grid2">${pinFieldHTML("sv_pin",cur.pinUrl)}
      <div class="fg"><label>Contact number</label><input id="sv_contact" value="${esc(cur.contact)}"></div></div>
    <div class="grid2"><div class="fg"><label>Email address</label><input id="sv_email" value="${esc(cur.email)}"></div>
      <div class="fg"><label>Status</label><select id="sv_status"><option ${cur.status==="Draft"?"selected":""}>Draft</option><option ${cur.status==="Completed"?"selected":""}>Completed</option></select></div></div>
@@ -6813,6 +6876,7 @@ async function surveyForm(id){
     set("sv_cname",c.name);set("sv_addr",c.address);set("sv_contact",c.phone);set("sv_email",c.email);set("sv_pin",c.pinUrl);});
   const _diff=document.getElementById("sv_diff"),_diffdef=document.getElementById("sv_diffdef");
   if(_diff&&_diffdef)_diff.onchange=()=>{_diffdef.textContent=svDiffDef(_diff.value);};
+  wirePinField("sv_pin",()=>gv("sv_addr"));
   bindSurveyPhotos();
 }
 
@@ -10554,13 +10618,14 @@ function afterSalesForm(id){
    <div class="fg"><label>Net-metering</label><select id="f_asnm">${["Approved","Pending","Not applicable"].map(x=>`<option ${r.netMetering===x?"selected":""}>${x}</option>`).join("")}</select></div>
    <div class="fg"><label>Linked project (lets the Engineer dept view the installed system)</label><select id="f_asproj"><option value="">— None —</option>${DB.projects.map(pr=>`<option value="${pr.id}" ${r.projectId===pr.id?"selected":""}>${esc(pr.name)}</option>`).join("")}</select></div>
    <div class="grid2"><div class="fg"><label>Installation address</label><input id="f_asaddr" value="${esc(r.address||"")}"></div>
-   <div class="fg"><label>Pin location (Google Maps URL)</label><input id="f_aspin" value="${esc(r.pinUrl||"")}" placeholder="https://maps.google.com/..."></div></div>
+   ${pinFieldHTML("f_aspin",r.pinUrl)}</div>
    <div class="fg"><label>Notes</label><textarea id="f_asnotes">${esc(r.notes)}</textarea></div>`,
    [["Cancel","btn-out",closeModal],["Save","btn-primary",async()=>{
      const d={client:gv("f_asclient"),projectId:gv("f_asproj"),systemType:gv("f_astype"),sizeKwp:+gv("f_assize")||0,commissioned:gv("f_ascomm"),lastPM:gv("f_aslast"),nextPM:gv("f_asnext"),warrantyEnd:gv("f_aswar"),monitoring:gv("f_asmon"),netMetering:gv("f_asnm"),address:gv("f_asaddr"),pinUrl:gv("f_aspin"),notes:gv("f_asnotes")};
      if(!d.client){alert("Select a client.");return;}
      if(id){Object.assign(r,d);await logAudit("update","after-sales",d.client,"Updated");}else{DB.aftersales.unshift({id:uid(),projectId:"",...d});await logAudit("create","after-sales",d.client,"Added");}
      await saveKey(K.aftersales,DB.aftersales);closeModal();viewAfterSales();}]]);
+  wirePinField("f_aspin",()=>gv("f_asaddr"));
 }
 async function delAfterSales(id){const r=DB.aftersales.find(x=>x.id===id);if(!r)return;if(!await uiConfirm("Delete this record?"))return;DB.aftersales=DB.aftersales.filter(x=>x.id!==id);await saveKey(K.aftersales,DB.aftersales);await logAudit("delete","after-sales",r.client,"Deleted");viewAfterSales();}
 
