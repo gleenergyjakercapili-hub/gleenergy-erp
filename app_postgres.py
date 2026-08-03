@@ -47,7 +47,8 @@ from _gleenergy_common import (
 
 DATABASE_URL = os.environ.get("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/gleenergy")
 
-app = FastAPI(title="Gleenergy API (PostgreSQL)")
+# Schema pages disabled — see app.py for why (public route catalog).
+app = FastAPI(title="Gleenergy API (PostgreSQL)", docs_url=None, redoc_url=None, openapi_url=None)
 
 
 # One small shared pool instead of a fresh connection per request. Render's

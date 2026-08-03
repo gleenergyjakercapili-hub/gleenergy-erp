@@ -62,7 +62,11 @@ from _gleenergy_common import (
 # Where the database file lives (override with the GLEENERGY_DB env var if you like)
 DB_PATH = os.environ.get("GLEENERGY_DB", os.path.join(os.path.dirname(__file__), "data", "gleenergy.db"))
 
-app = FastAPI(title="Gleenergy Renewables Company System API")
+# docs_url/redoc_url/openapi_url are disabled: the auto-generated schema pages
+# sat OUTSIDE the /api/* session guard and listed every endpoint name to
+# anyone. No data was exposed (all routes need a session), but the route
+# catalog is nobody's business.
+app = FastAPI(title="Gleenergy Renewables Company System API", docs_url=None, redoc_url=None, openapi_url=None)
 
 
 def _conn():
