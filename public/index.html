@@ -1571,6 +1571,11 @@ async function init(){
   DB.employees=await loadKey(K.emp,null)||(await saveKey(K.emp,seedEmployees()),seedEmployees());
   DB.clients=await loadKey(K.cli,null)||(await saveKey(K.cli,seedClients()),seedClients());
   DB.sequences=await loadKey(K.seq,null)||(await saveKey(K.seq,seedSequences()),seedSequences());
+  /* Same lesson as exptypes: an EMPTY stored list is truthy, so the seed above
+     never re-runs for it — deleting the last template left the live system
+     with a blank Sequence dropdown in the enroll form. Treat empty as
+     "not set up yet" and restore the starter template. */
+  if(!Array.isArray(DB.sequences)||!DB.sequences.length){DB.sequences=seedSequences();await saveKey(K.seq,DB.sequences);}
   DB.documents=await loadKey(K.doc,[]); DB.audit=await loadKey(K.aud,[]);
   DB.proposals=await loadKey(K.prop,[]); DB.enrollments=await loadKey(K.enr,[]);
   DB.inventory=await loadKey(K.inv,null)||(await saveKey(K.inv,seedInventory()),seedInventory());
@@ -3641,7 +3646,7 @@ function viewFollowups(){
   <div class="panel"><div class="panel-head"><h3>Active enrollments</h3></div>
     ${DB.enrollments.length?`<div style="overflow-x:auto"><table><thead><tr><th>Client</th><th>Sequence</th><th>Progress</th><th>Status</th><th></th></tr></thead><tbody>
     ${DB.enrollments.map(en=>{const seq=DB.sequences.find(s=>s.id===en.sequenceId);const tot=seq?seq.steps.length:0;
-      return`<tr><td><b>${esc(en.clientName)}</b></td><td>${esc(seq?seq.name:"—")}</td><td>${Math.min(en.step,tot)} / ${tot}</td>
+      return`<tr><td><b>${esc(en.clientName)}</b></td><td>${seq?esc(seq.name):'<span style="color:var(--muted)" title="This enrollment points at a template that was later deleted — its history is kept.">sequence deleted</span>'}</td><td>${Math.min(en.step,tot)} / ${tot}</td>
       <td><span class="tag ${en.status==="Active"?"t-active":"t-inactive"}">${esc(en.status)}</span></td>
       <td>${can("followups.edit")?`<button class="icobtn del" data-stop="${en.id}">Stop</button>`:''}</td></tr>`;}).join("")}
     </tbody></table></div>`:'<div class="empty">No active enrollments.</div>'}</div>
@@ -3700,6 +3705,11 @@ async function stopEnroll(enId){const en=DB.enrollments.find(e=>e.id===enId);if(
   const en2=DB.enrollments.find(e=>e.id===enId)||en;
   en2.status="Stopped";await saveKey(K.enr,DB.enrollments);await logAudit("update","follow-up",en2.clientName,"Stopped sequence");buildNav();viewFollowups();}
 function enrollForm(){
+  /* An enroll dialog with an empty Sequence dropdown is a dead end — say what
+     to do instead. (Normally impossible now: init restores the starter
+     template when the list is empty; this covers deleting every template
+     mid-session.) */
+  if(!(DB.sequences||[]).length){alert('No sequence templates yet. Click "+ New sequence" to create one first — then enroll clients into it.');return;}
   openModal("Enroll client in sequence",`
     <div class="fg"><label>Client</label><select id="f_eclient">${DB.clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select>
     <div id="f_eclientMail" style="font-size:11px;margin-top:4px"></div></div>
@@ -3707,6 +3717,7 @@ function enrollForm(){
     <div class="fg"><label>Start date</label><input id="f_estart" type="date" value="${new Date().toISOString().slice(0,10)}"></div>`,
     [["Cancel","btn-out",closeModal],["Enroll","btn-primary",async()=>{
       const c=DB.clients.find(x=>x.id===gv("f_eclient"));if(!c){alert("Pick a client.");return;}
+      if(!gv("f_eseq")||!DB.sequences.some(s=>s.id===gv("f_eseq"))){alert("Pick a sequence.");return;}
       DB.enrollments=await loadKey(K.enr,DB.enrollments)||DB.enrollments;
       DB.enrollments.unshift({id:uid(),clientId:c.id,clientName:c.name,sequenceId:gv("f_eseq"),start:gv("f_estart"),step:0,status:"Active",log:[]});
       await saveKey(K.enr,DB.enrollments);await logAudit("create","follow-up",c.name,"Enrolled in sequence");closeModal();buildNav();viewFollowups();
