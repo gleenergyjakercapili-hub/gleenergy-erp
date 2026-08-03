@@ -1470,7 +1470,7 @@ function newProposal(client){
 function seedSequences(){
   return [{id:"s1",name:"New Lead Nurture",steps:[
     {offsetDays:0,channel:"Email",subject:"Thank you for your interest in solar",message:"Hi {client}, thank you for considering going solar with us. Our experts have prepared an initial savings estimate for your home."},
-    {offsetDays:3,channel:"SMS",subject:"",message:"Hi {client}, just checking if you have any questions about your solar proposal. We're happy to help!"},
+    {offsetDays:3,channel:"Email",subject:"Any questions about your solar proposal?",message:"Hi {client}, just checking if you have any questions about your solar proposal. We're happy to help!"},
     {offsetDays:7,channel:"Email",subject:"Your projected solar savings",message:"Hi {client}, your proposal projects significant yearly savings versus your utility bill. Shall we schedule a site visit?"}
   ]}];
 }
@@ -1695,6 +1695,19 @@ async function init(){
   }
   if(!DB.rbac._opsMgr){if(!DB.rbac["Operations Manager"])DB.rbac["Operations Manager"]=defaultRbac()["Operations Manager"]||{};DB.rbac._opsMgr=true;await saveKey(K.rbac,DB.rbac);}
   if(!DB.rbac._docsAll){Object.keys(DB.rbac).forEach(role=>{if(role[0]==="_")return;if(DB.rbac[role]&&typeof DB.rbac[role]==="object")DB.rbac[role]["documents.view"]=true;});DB.rbac._docsAll=true;await saveKey(K.rbac,DB.rbac);}
+  /* Email-first outreach (2026-08): SMS is excluded from automated follow-ups —
+     it now belongs to the Meta/Messenger ads side, so sequences go out by email
+     to the address each client provided. One-time convert of any stored SMS
+     steps (a converted step gets a default subject); the sequence editor and
+     the sender are email-only from here on. Old SMS sends stay in history. */
+  if(!DB.rbac._fuEmailOnly){
+    let _chgSeq=false;
+    (DB.sequences||[]).forEach(s=>(s.steps||[]).forEach(st=>{
+      if(st.channel!=="Email"){st.channel="Email";if(!st.subject)st.subject="Following up on your solar proposal";_chgSeq=true;}
+    }));
+    if(_chgSeq)await saveKey(K.seq,DB.sequences);
+    DB.rbac._fuEmailOnly=true;await saveKey(K.rbac,DB.rbac);
+  }
   // seed a demo proposal + enrollment once
   if(!(await loadKey("p2:demoseeded",""))){
     if(DB.proposals.length===0){const q=DB.clients.find(c=>c.id==="c1");const p=newProposal(q);p.status="Sent";p.propNo="1";DB.proposals.push(p);await saveKey(K.prop,DB.proposals);}
@@ -3611,17 +3624,18 @@ function viewFollowups(){
   const seqOpts=DB.sequences.map(s=>`<span class="tag t-contacted">${esc(s.name)} · ${s.steps.length} steps</span>`).join(" ");
   V().innerHTML=`
   ${engFollowupPanel()}
-  <div class="notice">This engine schedules and tracks follow-ups. On the Python server, <b>Send</b> delivers a real <b>email</b> (via email_config.json) or <b>SMS</b> (via sms_config.json, Semaphore) to the client. Each client needs an email and/or mobile number saved in Clients / CRM.</div>
+  <div class="notice">Follow-ups go out by <b>email only</b> — SMS is excluded from automated outreach (it belongs to the Meta&nbsp;Ads&nbsp;/&nbsp;Messenger side now). <b>Send</b> delivers a real email (via email_config.json on the Python server) to the address saved on each client, so make sure every client's email is captured in Clients / CRM. Earlier SMS sends remain in the history below.</div>
   <div class="kpis">${kpiCard("Due now",String(due.length),SOLAR.bell,due.length?"#d12b2b":"#502e8a",due.length?"#fbe9e9":"#efeafa",due.length>0)}
     ${kpiCard("Active sequences",String(DB.enrollments.filter(e=>e.status==="Active").length),SOLAR.trend,"#1f9d57","#e7f6ee")}
     ${kpiCard("Templates",String(DB.sequences.length),SOLAR.doc,"#6f2c8f","#f0e9f6")}</div>
 
   <div class="panel"><div class="panel-head"><h3>Due now</h3>${can("followups.edit")?'<button class="btn btn-primary" id="enroll">+ Enroll client</button>':''}</div>
     ${due.length?`<table><thead><tr><th>Client</th><th>Channel</th><th>Message</th><th></th></tr></thead><tbody>
-    ${due.map((d,i)=>`<tr><td><b>${esc(d.en.clientName)}</b><div style="font-size:11px;color:var(--muted)">${esc(d.seq.name)} · step ${d.en.step+1}</div></td>
-      <td><span class="tag ${d.step.channel==="Email"?"t-email":"t-sms"}">${esc(d.step.channel)}</span></td>
+    ${due.map((d,i)=>{const _c=DB.clients.find(x=>x.id===d.en.clientId)||DB.clients.find(x=>x.name===d.en.clientName);const _em=((_c&&_c.email)||"").trim();
+      return`<tr><td><b>${esc(d.en.clientName)}</b><div style="font-size:11px;color:var(--muted)">${esc(d.seq.name)} · step ${d.en.step+1}</div>${_em?`<div style="font-size:11px;color:var(--muted)">→ ${esc(_em)}</div>`:'<div style="font-size:11px;color:var(--red);font-weight:700">No email on file — add it in Clients / CRM</div>'}</td>
+      <td><span class="tag t-email">Email</span></td>
       <td style="font-size:12px;color:#444">${d.step.subject?`<b>${esc(d.step.subject)}</b><br>`:""}${esc(fillMsg(d.step.message,d.en.clientName))}</td>
-      <td>${can("followups.edit")?`<button class="icobtn go" data-send="${d.en.id}">Send</button>`:'<span style="color:var(--muted);font-size:12px">view only</span>'}</td></tr>`).join("")}
+      <td>${can("followups.edit")?`<button class="icobtn go" data-send="${d.en.id}">Send</button>`:'<span style="color:var(--muted);font-size:12px">view only</span>'}</td></tr>`;}).join("")}
     </tbody></table>`:'<div class="empty">Nothing due right now. 🎉</div>'}</div>
 
   <div class="panel"><div class="panel-head"><h3>Active enrollments</h3></div>
@@ -3637,7 +3651,7 @@ function viewFollowups(){
     ${DB.sequences.map(s=>`<div style="border:1px solid var(--line);border-radius:10px;padding:12px;margin-bottom:10px">
       <div style="display:flex;justify-content:space-between;align-items:center"><b>${esc(s.name)}</b>
       ${can("followups.edit")?`<span><button class="icobtn" data-eseq="${s.id}">Edit</button> <button class="icobtn del" data-dseq="${s.id}">Del</button></span>`:""}</div>
-      <div style="margin-top:8px;font-size:12px;color:#555">${s.steps.map(st=>`Day ${st.offsetDays} · <span class="tag ${st.channel==="Email"?"t-email":"t-sms"}">${esc(st.channel)}</span> ${esc(st.subject||st.message.slice(0,40))}`).join("<br>")}</div>
+      <div style="margin-top:8px;font-size:12px;color:#555">${s.steps.map(st=>`Day ${st.offsetDays} · <span class="tag t-email">Email</span> ${esc(st.subject||st.message.slice(0,40))}`).join("<br>")}</div>
     </div>`).join("")}
     </div></div>
   <div class="panel"><div class="panel-head"><h3>Send history</h3><span style="font-size:12px;color:var(--muted)">${sentCount} sent${failCount?` · <span style="color:var(--red)">${failCount} failed</span>`:""}</span></div>
@@ -3651,64 +3665,77 @@ function viewFollowups(){
   V().querySelectorAll("[data-eseq]").forEach(b=>b.onclick=()=>seqForm(b.dataset.eseq));
   V().querySelectorAll("[data-dseq]").forEach(b=>b.onclick=()=>delSeq(b.dataset.dseq));
 }
+/* Follow-up automation is EMAIL-ONLY (SMS excluded 2026-08 — it lives in the
+   Meta/Messenger ads space now). Every step, including any legacy SMS step
+   that predates the migration, sends as an email to the client's saved
+   address; a client without an email is flagged instead of silently skipped. */
 async function sendStep(enId){
+  /* refresh-before-write: two salespeople sending different clients' steps at
+     the same time must not erase each other's send logs. */
+  DB.enrollments=await loadKey(K.enr,DB.enrollments)||DB.enrollments;
   const en=DB.enrollments.find(e=>e.id===enId);if(!en)return;const seq=DB.sequences.find(s=>s.id===en.sequenceId);if(!seq)return;
   const step=seq.steps[en.step];if(!step)return;
   const c=DB.clients.find(x=>x.id===en.clientId)||DB.clients.find(x=>x.name===en.clientName);
   const msgText=fillMsg(step.message,en.clientName);
   const base=(window.GLEENERGY_API||"/api/storage").replace(/\/storage\/?$/,"");
-  let mode="simulated",toAddr="",errMsg="";
-  if(step.channel==="Email"){
-    toAddr=((c&&c.email)||"").trim();
-    if(!toAddr){toast("No email on file for "+en.clientName+". Add it in Clients / CRM first.","error");return;}
-    try{
-      const r=await fetch(base+"/send-email",{method:"POST",headers:window.gleenergyHeaders(),body:JSON.stringify({to:toAddr,subject:step.subject||"",body:msgText})});
-      const d=await r.json().catch(()=>({}));
-      if(r.ok&&d&&d.ok)mode="sent"; else {mode="failed";errMsg=(d&&d.error)||("HTTP "+r.status);}
-    }catch(e){mode="offline";}
-  } else if(step.channel==="SMS"){
-    toAddr=((c&&c.phone)||"").trim();
-    if(!toAddr){toast("No mobile number on file for "+en.clientName+". Add it in Clients / CRM first.","error");return;}
-    try{
-      const r=await fetch(base+"/send-sms",{method:"POST",headers:window.gleenergyHeaders(),body:JSON.stringify({to:toAddr,body:msgText})});
-      const d=await r.json().catch(()=>({}));
-      if(r.ok&&d&&d.ok)mode="sent"; else {mode="failed";errMsg=(d&&d.error)||("HTTP "+r.status);}
-    }catch(e){mode="offline";}
-  }
-  if(mode==="failed"){toast(step.channel+" not sent: "+errMsg,"error");}
-  en.log.push({ts:new Date().toISOString(),channel:step.channel,text:msgText,delivery:mode,to:toAddr,error:errMsg||""});
+  let mode="simulated",errMsg="";
+  const toAddr=((c&&c.email)||"").trim();
+  if(!toAddr){toast("No email on file for "+en.clientName+" — follow-ups send by email. Add the client's email address in Clients / CRM first.","error");return;}
+  try{
+    const r=await fetch(base+"/send-email",{method:"POST",headers:window.gleenergyHeaders(),body:JSON.stringify({to:toAddr,subject:step.subject||"Following up from Gleenergy",body:msgText})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok&&d&&d.ok)mode="sent"; else {mode="failed";errMsg=(d&&d.error)||("HTTP "+r.status);}
+  }catch(e){mode="offline";}
+  if(mode==="failed"){toast("Email not sent: "+errMsg,"error");}
+  en.log.push({ts:new Date().toISOString(),channel:"Email",text:msgText,delivery:mode,to:toAddr,error:errMsg||""});
   if(mode!=="failed"){ en.step++; if(en.step>=seq.steps.length)en.status="Completed"; }
   await saveKey(K.enr,DB.enrollments);
-  await logAudit("send","follow-up",en.clientName,`${step.channel} — ${seq.name} step (${mode})`);
+  await logAudit("send","follow-up",en.clientName,`Email — ${seq.name} step (${mode})`);
   buildNav();viewFollowups();
-  if(mode==="sent")toast(step.channel+" sent to "+toAddr,"ok");
-  else if(mode==="offline")toast("Logged only — start the Python server with "+(step.channel==="SMS"?"SMS":"email")+" set up to send for real.");
+  if(mode==="sent")toast("Email sent to "+toAddr,"ok");
+  else if(mode==="offline")toast("Logged only — start the Python server with email set up to send for real.");
 }
 async function stopEnroll(enId){const en=DB.enrollments.find(e=>e.id===enId);if(!en)return;if(!await uiConfirm(`Stop follow-ups for ${en.clientName}?`))return;
-  en.status="Stopped";await saveKey(K.enr,DB.enrollments);await logAudit("update","follow-up",en.clientName,"Stopped sequence");buildNav();viewFollowups();}
+  DB.enrollments=await loadKey(K.enr,DB.enrollments)||DB.enrollments;
+  const en2=DB.enrollments.find(e=>e.id===enId)||en;
+  en2.status="Stopped";await saveKey(K.enr,DB.enrollments);await logAudit("update","follow-up",en2.clientName,"Stopped sequence");buildNav();viewFollowups();}
 function enrollForm(){
   openModal("Enroll client in sequence",`
-    <div class="fg"><label>Client</label><select id="f_eclient">${DB.clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select></div>
+    <div class="fg"><label>Client</label><select id="f_eclient">${DB.clients.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join("")}</select>
+    <div id="f_eclientMail" style="font-size:11px;margin-top:4px"></div></div>
     <div class="fg"><label>Sequence</label><select id="f_eseq">${DB.sequences.map(s=>`<option value="${s.id}">${esc(s.name)}</option>`).join("")}</select></div>
     <div class="fg"><label>Start date</label><input id="f_estart" type="date" value="${new Date().toISOString().slice(0,10)}"></div>`,
     [["Cancel","btn-out",closeModal],["Enroll","btn-primary",async()=>{
       const c=DB.clients.find(x=>x.id===gv("f_eclient"));if(!c){alert("Pick a client.");return;}
+      DB.enrollments=await loadKey(K.enr,DB.enrollments)||DB.enrollments;
       DB.enrollments.unshift({id:uid(),clientId:c.id,clientName:c.name,sequenceId:gv("f_eseq"),start:gv("f_estart"),step:0,status:"Active",log:[]});
       await saveKey(K.enr,DB.enrollments);await logAudit("create","follow-up",c.name,"Enrolled in sequence");closeModal();buildNav();viewFollowups();
     }]]);
+  /* Over-inform at enroll time: follow-ups go by email, so show exactly where
+     they will land — or a clear warning when the client has no address yet. */
+  const _sel=document.getElementById("f_eclient"),_hint=document.getElementById("f_eclientMail");
+  const _updMail=()=>{const c=DB.clients.find(x=>x.id===_sel.value);const em=((c&&c.email)||"").trim();
+    _hint.innerHTML=em?`<span style="color:var(--muted)">Follow-ups will email <b>${esc(em)}</b></span>`
+                     :'<span style="color:var(--red);font-weight:700">This client has no email address — add it in Clients / CRM so follow-ups can send.</span>';};
+  if(_sel&&_hint){_sel.onchange=_updMail;_updMail();}
 }
 function seqForm(id){
   const s=id?DB.sequences.find(x=>x.id===id):{name:"",steps:[]};
-  const lines=s.steps.map(st=>`${st.offsetDays} | ${st.channel} | ${st.subject||""} | ${st.message}`).join("\n");
+  const lines=s.steps.map(st=>`${st.offsetDays} | ${st.subject||""} | ${st.message}`).join("\n");
   openModal(id?"Edit sequence":"New sequence",`
     <div class="fg"><label>Sequence name</label><input id="f_sname" value="${esc(s.name)}"></div>
-    <div class="fg"><label>Steps — one per line: <code>day | Email/SMS | subject | message</code></label>
+    <div class="fg"><label>Steps — one per line: <code>day | subject | message</code></label>
+    <div style="font-size:11px;color:var(--muted);margin:-2px 0 6px">Every step sends as an <b>email</b> to the address saved on the client — SMS is excluded from automated outreach.</div>
     <textarea id="f_ssteps" style="min-height:150px">${esc(lines)}</textarea></div>
     <div style="font-size:11px;color:var(--muted)">Use {client} in the message to insert the client's name.</div>`,
     [["Cancel","btn-out",closeModal],["Save","btn-primary",async()=>{
       const name=gv("f_sname").trim();if(!name){alert("Name required.");return;}
       const steps=gv("f_ssteps").split("\n").filter(x=>x.trim()).map(l=>{const c=l.split("|").map(x=>x.trim());
-        return{offsetDays:+c[0]||0,channel:(c[1]||"Email").toLowerCase()==="sms"?"SMS":"Email",subject:c[2]||"",message:c[3]||""};});
+        /* Old saved format was `day | Email/SMS | subject | message` — if the
+           second field is a channel word, skip it so pasted legacy lines
+           still parse. Pipes inside the message are preserved. */
+        const legacy=c.length>=4&&/^(email|sms)$/i.test(c[1]||"");
+        return{offsetDays:+c[0]||0,channel:"Email",subject:(legacy?c[2]:c[1])||"",message:(legacy?c.slice(3):c.slice(2)).join(" | ")};});
       if(id){s.name=name;s.steps=steps;await logAudit("update","sequence",name,"Edited sequence");}
       else{DB.sequences.push({id:uid(),name,steps});await logAudit("create","sequence",name,"Added sequence");}
       await saveKey(K.seq,DB.sequences);closeModal();viewFollowups();
