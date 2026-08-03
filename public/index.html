@@ -1075,7 +1075,10 @@
      guarantees a ~44px hit zone. The VISIBLE control keeps its elegant size;
      an invisible centered overlay extends the tappable area beyond it. */
   @media (pointer:coarse),(max-width:740px){
-    .pass-toggle,.forgot-link,.icobtn,.rowact-more,.modal-head .x,.segbar button,.mnav>button{position:relative}
+    /* .pass-toggle is deliberately NOT in this list: it is position:absolute
+       (pinned inside the password field), which already anchors its ::after
+       overlay — forcing relative here knocked it out of the field on phones. */
+    .forgot-link,.icobtn,.rowact-more,.modal-head .x,.segbar button,.mnav>button{position:relative}
     .pass-toggle::after,.forgot-link::after,.icobtn::after,.rowact-more::after,.modal-head .x::after,.segbar button::after,.mnav>button::after{
       content:"";position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);
       width:max(100%,44px);height:max(100%,44px)}
