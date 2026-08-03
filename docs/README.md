@@ -167,68 +167,21 @@ send a REAL email to the client, set up email once:
 
 Notes:
   - The client must have an email address saved in Clients / CRM.
-  - SMS is still log-only for now. To make SMS live, an SMS gateway
-    (Twilio, or Semaphore/Movider in the Philippines) can be added the
-    same way — just ask.
   - Keep email_config.json private (it holds your app password). Anyone
     with the file can send mail as you.
   - Other SMTP providers work too (Outlook/Office365, Zoho, your host's
     mail server) — just use their host/port and your mailbox login.
 
 -----------------------------------------------------------------------
-SENDING REAL FOLLOW-UP SMS (optional, via Semaphore)
+SMS — REMOVED (2026-08)
 -----------------------------------------------------------------------
-Semaphore (https://semaphore.co) is an SMS gateway for the Philippines
-(Globe, Smart, Sun, DITO). To make the Follow-ups "Send" button send a
-real SMS:
-
-  1. Sign up at https://semaphore.co and load some credit
-     (outbound SMS is around PHP 0.50-0.60 per text).
-  2. From your Semaphore dashboard, copy your **API key**.
-  3. Open the file  sms_config.json  in this folder and set:
-       - "enabled": true
-       - "api_key": paste your Semaphore API key
-       - "sender_name": leave "" to use the default "SEMAPHORE", OR put an
-         approved Sender Name from your Semaphore account (custom sender
-         names must be registered/approved by Semaphore first).
-  4. Save and restart the server (close the window, run start.bat).
-  5. In Follow-ups, click Send on an SMS step. The client receives a real
-     text and you'll see "SMS sent to ..." confirmation.
-
-Notes:
-  - The client must have a mobile number saved in Clients / CRM. Formats
-    like 09171234567, 639171234567, or 0917-123-4567 all work.
-  - Each text costs money and uses your Semaphore credit, so test with
-    your own number first.
-  - Keep sms_config.json private (it holds your API key).
-  - If a send fails, the app shows the exact reason from Semaphore
-    (e.g. invalid number, insufficient credit, unregistered sender name).
-
------------------------------------------------------------------------
-USING A CUSTOM SMS SENDER NAME (GLEENERGY)
------------------------------------------------------------------------
-By default, texts show "SEMAPHORE" as the sender. To make them show your
-brand (GLEENERGY) instead:
-
-  IMPORTANT: SMS sender names can be at most 11 letters/numbers, so the
-  full "Gleenergy Renewables Company" will NOT fit. Use "GLEENERGY".
-
-  1. Log in to your Semaphore dashboard and open "Sender Names".
-  2. Submit a new Sender Name:  GLEENERGY
-     - Provide a sample message (e.g. the follow-up text you'll send).
-     - The account must be registered as a business.
-  3. Wait for approval (up to ~5 business days). Semaphore emails you
-     when it's approved.
-  4. Once approved, it's already set: sms_config.json has
-     "sender_name": "GLEENERGY". Just make sure "enabled": true and
-     restart the server.
-
-While you are WAITING for approval:
-  - Set  "sender_name": ""  (blank) in sms_config.json so texts go out
-    under the default sender. If you leave it as GLEENERGY before it's
-    approved, Semaphore will reject the send and the app will tell you.
-  - The app also blocks any sender name longer than 11 characters with a
-    clear message, so you can't accidentally use the full company name.
+Follow-up outreach is EMAIL-ONLY. SMS shifted into the Meta Ads /
+Messenger space, so the Semaphore SMS integration was removed from the
+system entirely — there is no /api/send-sms endpoint and nothing reads
+sms_config.json anymore. Any Semaphore subscription/credit can be
+cancelled; if you kept a config/sms_config.json file, it is unused and
+can be deleted. Old SMS sends remain visible in the Follow-ups Send
+history for the record.
 
 -----------------------------------------------------------------------
 RECEIVING CLIENT REPLIES (Reply-To + company copy)

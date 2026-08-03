@@ -13,7 +13,7 @@ It works because your app saves everything through two helpers
 methods: get, set, delete, list. This server implements those same four
 methods over HTTP, so NOTHING in the app itself has to change.
 
-Everything that is NOT SQLite-specific (email, SMS, serving the app, the
+Everything that is NOT SQLite-specific (email, serving the app, the
 API-key protection) lives in _gleenergy_common.py and is shared with the
 PostgreSQL backend so there is only one copy to maintain.
 

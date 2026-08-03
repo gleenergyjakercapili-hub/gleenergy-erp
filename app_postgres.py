@@ -6,8 +6,8 @@ Same four storage methods as app.py, but data is stored in PostgreSQL
 instead of a local SQLite file. Use this once more than a couple of people
 use the system at the same time, or when you deploy to a server.
 
-Everything that is NOT PostgreSQL-specific (email, SMS, serving the app,
-the API-key protection) lives in _gleenergy_common.py and is shared with
+Everything that is NOT PostgreSQL-specific (email, serving the app,
+the auth protection) lives in _gleenergy_common.py and is shared with
 the SQLite backend, so there is only one copy to maintain.
 
 SETUP
@@ -231,7 +231,7 @@ def storage_changes(body: ChangesBody):
     return changes_reply(rows, body.since, prow[0] if prow else "")
 
 
-# Attach the shared routes (email, SMS, health, index, static) LAST.
+# Attach the shared routes (email, health, index, static) LAST.
 install_shared(app, auth_db=AUTH_DB)
 
 

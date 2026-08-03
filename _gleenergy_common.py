@@ -8,8 +8,11 @@ Everything that is NOT database-specific lives here so there is ONE copy to fix:
   - request body shapes (Pydantic models)
   - API-key protection for the /api/* routes
   - email sending  (/api/send-email)
-  - SMS sending    (/api/send-sms)
   - serving the app (index + static files in public/)
+
+SMS was REMOVED (2026-08): follow-up outreach is email-only (SMS shifted to
+the Meta Ads / Messenger space), so the Semaphore integration and its
+subscription cost are gone — /api/send-sms no longer exists.
 
 Each backend just defines its own `_conn()` + the four storage routes, then calls
 `install_shared(app)` to attach all of the above.
@@ -47,9 +50,7 @@ import hashlib
 import secrets
 import datetime
 import smtplib
-import urllib.request
 import urllib.parse
-import urllib.error
 from email.message import EmailMessage
 
 from pydantic import BaseModel
@@ -62,7 +63,6 @@ BASE_DIR = os.path.dirname(__file__)
 PUBLIC_DIR = os.path.join(BASE_DIR, "public")
 INDEX_FILE = os.path.join(PUBLIC_DIR, "index.html")
 EMAIL_CONFIG_FILE = os.path.join(BASE_DIR, "config", "email_config.json")
-SMS_CONFIG_FILE = os.path.join(BASE_DIR, "config", "sms_config.json")
 
 # Secret for server-to-server scripts/backups (X-API-Key header). Browsers use
 # session cookies instead; this is never injected into the served page.
@@ -307,11 +307,6 @@ class EmailBody(BaseModel):
     body: str = ""
 
 
-class SmsBody(BaseModel):
-    to: str = ""
-    body: str = ""
-
-
 class XlsxBody(BaseModel):
     name: str = ""
     b64: str = ""          # base64 of the .xlsx/.xlsm (data: URL prefix tolerated)
@@ -331,7 +326,8 @@ def _load_json(path):
 
 
 # ----------------------------------------------------------------------
-# Email + SMS senders (plain functions; the routes below just wrap them)
+# Email sender (plain function; the route below just wraps it).
+# SMS/Semaphore was removed 2026-08 — outreach is email-only.
 # ----------------------------------------------------------------------
 def _send_email(body: EmailBody):
     to = (body.to or "").strip()
@@ -388,59 +384,6 @@ def _send_email(body: EmailBody):
             {"ok": False, "error": "Could not send the email. Check the server log and your email_config.json."},
             status_code=500,
         )
-
-
-def _send_sms(body: SmsBody):
-    number = (body.to or "").strip()
-    message = body.body or ""
-
-    cfg = _load_json(SMS_CONFIG_FILE)
-    if not cfg.get("enabled"):
-        return JSONResponse(
-            {"ok": False, "error": "SMS is not set up yet. Open sms_config.json, add your Semaphore API key, and set enabled to true."},
-            status_code=400,
-        )
-    if not number:
-        return JSONResponse({"ok": False, "error": "This client has no mobile number."}, status_code=400)
-    if not cfg.get("api_key"):
-        return JSONResponse({"ok": False, "error": "Missing Semaphore api_key in sms_config.json."}, status_code=400)
-
-    data = {"apikey": cfg.get("api_key", ""), "number": number, "message": message}
-    sender = (cfg.get("sender_name") or "").strip()
-    if sender:
-        if len(sender) > 11:
-            return JSONResponse(
-                {"ok": False, "error": f'Sender name "{sender}" is {len(sender)} characters. Semaphore sender names must be 11 characters or fewer. Try "GLEENERGY".'},
-                status_code=400,
-            )
-        data["sendername"] = sender
-
-    endpoint = cfg.get("endpoint") or "https://api.semaphore.co/api/v4/messages"
-    try:
-        encoded = urllib.parse.urlencode(data).encode()
-        request_obj = urllib.request.Request(endpoint, data=encoded, method="POST")
-        with urllib.request.urlopen(request_obj, timeout=25) as resp:
-            raw = resp.read().decode("utf-8", "ignore")
-        try:
-            parsed = json.loads(raw)
-        except Exception:
-            parsed = raw
-        # Success: Semaphore returns a list of message objects with a message_id.
-        if isinstance(parsed, list) and parsed and isinstance(parsed[0], dict) and parsed[0].get("message_id"):
-            return {"ok": True, "to": number, "status": parsed[0].get("status"), "id": parsed[0].get("message_id")}
-        # Otherwise it's an error description (dict or text) from Semaphore — this
-        # one is safe (and useful) to surface: invalid number, no credit, etc.
-        err = parsed if isinstance(parsed, str) else json.dumps(parsed)
-        return JSONResponse({"ok": False, "error": err}, status_code=502)
-    except urllib.error.HTTPError as e:
-        try:
-            detail = e.read().decode("utf-8", "ignore")
-        except Exception:
-            detail = str(e)
-        return JSONResponse({"ok": False, "error": f"HTTP {e.code}: {detail}"}, status_code=502)
-    except Exception as e:
-        print(f"[send-sms] failed: {e!r}")
-        return JSONResponse({"ok": False, "error": "Could not send the SMS. Check the server log."}, status_code=500)
 
 
 # ----------------------------------------------------------------------
@@ -730,10 +673,6 @@ def install_shared(app, auth_db=None):
     @app.post("/api/send-email")
     def send_email(body: EmailBody):
         return _send_email(body)
-
-    @app.post("/api/send-sms")
-    def send_sms(body: SmsBody):
-        return _send_sms(body)
 
     @app.post("/api/xlsx/parse")
     def xlsx_parse(body: XlsxBody):
