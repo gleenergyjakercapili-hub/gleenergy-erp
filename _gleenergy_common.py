@@ -62,7 +62,17 @@ from starlette.concurrency import run_in_threadpool
 BASE_DIR = os.path.dirname(__file__)
 PUBLIC_DIR = os.path.join(BASE_DIR, "public")
 INDEX_FILE = os.path.join(PUBLIC_DIR, "index.html")
-EMAIL_CONFIG_FILE = os.path.join(BASE_DIR, "config", "email_config.json")
+# The email config can live in three places; the first one that loads wins:
+#   config/email_config.json        — office PC / local layout (config/ is gitignored)
+#   /etc/secrets/email_config.json  — a Render "Secret File" (Render's mount point)
+#   email_config.json               — Render also copies secret files into the app root
+# This is what lets the cloud service get its SMTP credentials via the Render
+# dashboard without the secret ever touching GitHub.
+EMAIL_CONFIG_CANDIDATES = (
+    os.path.join(BASE_DIR, "config", "email_config.json"),
+    "/etc/secrets/email_config.json",
+    os.path.join(BASE_DIR, "email_config.json"),
+)
 
 # Secret for server-to-server scripts/backups (X-API-Key header). Browsers use
 # session cookies instead; this is never injected into the served page.
@@ -334,7 +344,11 @@ def _send_email(body: EmailBody):
     subject = body.subject or "(no subject)"
     text = body.body or ""
 
-    cfg = _load_json(EMAIL_CONFIG_FILE)
+    cfg = {}
+    for _p in EMAIL_CONFIG_CANDIDATES:
+        cfg = _load_json(_p)
+        if cfg:
+            break
     if not cfg.get("enabled"):
         return JSONResponse(
             {"ok": False, "error": "Email is not set up yet. Open email_config.json, fill in your details, and set enabled to true."},
