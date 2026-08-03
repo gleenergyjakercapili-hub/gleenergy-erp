@@ -46,11 +46,13 @@ import json
 import ssl
 import time
 import hmac
+import base64
 import hashlib
 import secrets
 import datetime
 import smtplib
 import urllib.parse
+from typing import List
 from email.message import EmailMessage
 
 from pydantic import BaseModel
@@ -311,10 +313,17 @@ class LoginBody(BaseModel):
     password: str = ""
 
 
+class EmailAttachment(BaseModel):
+    filename: str = ""
+    b64: str = ""                       # base64 payload (data: URL prefix tolerated)
+    mime: str = "application/octet-stream"
+
+
 class EmailBody(BaseModel):
     to: str = ""
     subject: str = ""
     body: str = ""
+    attachments: List[EmailAttachment] = []   # e.g. the proposal PDF
 
 
 class XlsxBody(BaseModel):
@@ -373,6 +382,25 @@ def _send_email(body: EmailBody):
     if bcc:
         msg["Bcc"] = bcc               # private copy (stripped before sending, but still delivered)
     msg.set_content(text)
+
+    # Attachments (e.g. the proposal PDF). Capped at 5 files / 15 MB total —
+    # most mail providers reject anything larger anyway.
+    total = 0
+    for att in (body.attachments or [])[:5]:
+        raw = (att.b64 or "").strip()
+        if raw.lower().startswith("data:") and "," in raw:
+            raw = raw.split(",", 1)[1]
+        try:
+            data = base64.b64decode(raw)
+        except Exception:
+            return JSONResponse({"ok": False, "error": f"Attachment {att.filename or '?'} is not valid base64."}, status_code=400)
+        total += len(data)
+        if total > 15 * 1024 * 1024:
+            return JSONResponse({"ok": False, "error": "Attachments are over 15 MB in total — too large to email."}, status_code=400)
+        mime = att.mime or "application/octet-stream"
+        maintype, _, subtype = mime.partition("/")
+        msg.add_attachment(data, maintype=maintype or "application", subtype=subtype or "octet-stream",
+                           filename=att.filename or "attachment.bin")
 
     host = cfg.get("smtp_host", "smtp.gmail.com")
     port = int(cfg.get("smtp_port", 587))

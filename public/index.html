@@ -3186,11 +3186,11 @@ function viewProposals(){
   const rows=list.map(p=>{const t=propTotals(p);
     const acts=propView==="archived"
       ? `<button class="icobtn go" data-open="${p.id}">Open / Print</button><button class="icobtn" data-summary="${p.id}">Summary</button>${can("records.delete")?`<button class="icobtn" data-restore="${p.id}">Restore</button><button class="icobtn del" data-purge="${p.id}">Delete permanently</button>`:""}`
-      : `<button class="icobtn go" data-open="${p.id}">Open / Print</button><button class="icobtn" data-summary="${p.id}">Summary</button>${can("projects.convert")?`<button class="icobtn" data-conv="${p.id}">→ Project</button>`:""}${can("proposals.edit")?`<button class="icobtn" data-edit="${p.id}">Edit</button>`:""}${can("records.delete")?`<button class="icobtn del" data-del="${p.id}">Del</button>`:""}`;
+      : `<button class="icobtn go" data-open="${p.id}">Open / Print</button>${can("proposals.edit")?`<button class="icobtn go" data-mail="${p.id}">Email PDF</button>`:""}<button class="icobtn" data-summary="${p.id}">Summary</button>${can("projects.convert")?`<button class="icobtn" data-conv="${p.id}">→ Project</button>`:""}${can("proposals.edit")?`<button class="icobtn" data-edit="${p.id}">Edit</button>`:""}${can("records.delete")?`<button class="icobtn del" data-del="${p.id}">Del</button>`:""}`;
     return `<tr>
       <td>#${esc(p.propNo)}</td><td><b>${esc(p.clientName)}</b><div style="font-size:11px;color:var(--muted)">${esc(p.date)}</div></td>
       <td>${esc(p.pvKwp)}kW \u00b7 ${esc(p.batteryKwh)}kWh</td><td><b>${peso(t.final)}</b>${t.negotiated>0?'<div style="font-size:10px;color:var(--ok)">agreed</div>':''}</td>
-      <td>${propView==="archived"?`<span class="tag t-rejected">Archived</span>${p.archivedAt?`<div style="font-size:10px;color:var(--muted)">${esc((p.archivedAt||"").slice(0,10))}${p.archivedBy?" \u00b7 "+esc(p.archivedBy):""}</div>`:""}`:st(p.status)}</td>
+      <td>${propView==="archived"?`<span class="tag t-rejected">Archived</span>${p.archivedAt?`<div style="font-size:10px;color:var(--muted)">${esc((p.archivedAt||"").slice(0,10))}${p.archivedBy?" \u00b7 "+esc(p.archivedBy):""}</div>`:""}`:st(p.status)}${p.emailedAt?`<div style="font-size:10px;color:var(--muted)" title="PDF emailed by ${esc(p.emailedBy||"")}">\u2709 ${esc((p.emailedAt||"").slice(0,10))} \u00b7 ${esc(p.emailedTo||"")}</div>`:""}</td>
       <td><div class="rowact">${acts}</div></td></tr>`;}).join("");
   V().innerHTML=`<div class="panel"><div class="panel-head"><h3>Proposals</h3><div class="tools">
     ${can("proposals.design")?'<button class="btn btn-light" id="designCfgBtn">Design settings</button>':''}${can("proposals.create")?'<button class="btn btn-primary" id="addProp">+ New proposal</button>':''}</div></div>
@@ -3208,6 +3208,7 @@ function viewProposals(){
   V().querySelectorAll("[data-purge]").forEach(b=>b.onclick=()=>purgeProposal(b.dataset.purge));
   V().querySelectorAll("[data-conv]").forEach(b=>b.onclick=()=>convertToProject(b.dataset.conv));
   V().querySelectorAll("[data-summary]").forEach(b=>b.onclick=()=>materialsSummaryPrint(DB.proposals.find(p=>p.id===b.dataset.summary)));
+  V().querySelectorAll("[data-mail]").forEach(b=>b.onclick=()=>emailProposalPdf(b.dataset.mail));
 }
 async function delProposal(id){
   if(!can("records.delete")){alert("Only the GM/CEO can delete records.");return;}
@@ -3237,7 +3238,7 @@ function proposalEditor(id,client,keep){
   document.getElementById("viewTitle").textContent=id?"Edit Proposal":"New Proposal";
   V().innerHTML=`
   <div class="panel"><div class="panel-head"><h3>${id?"Edit":"New"} proposal</h3>
-    <div class="tools"><button class="btn btn-out" id="pCancel">Cancel</button><button class="btn btn-light" id="pPreview">Preview</button><button class="btn btn-light" id="pSummary">Materials Summary</button><button class="btn btn-light" id="pSaveOpen">Save & Open</button><button class="btn btn-primary" id="pSave">Save</button></div></div>
+    <div class="tools"><button class="btn btn-out" id="pCancel">Cancel</button><button class="btn btn-light" id="pPreview">Preview</button><button class="btn btn-light" id="pSummary">Materials Summary</button><button class="btn btn-light" id="pSaveOpen">Save & Open</button><button class="btn btn-light" id="pEmail">Save & Email PDF</button><button class="btn btn-primary" id="pSave">Save</button></div></div>
   <div style="padding:18px">
     <div class="sec-h">Client & header</div>
     <div class="grid3">
@@ -3290,6 +3291,8 @@ function proposalEditor(id,client,keep){
   document.getElementById("pCancel").onclick=()=>{EDIT=null;go("proposals");};
   document.getElementById("pSave").onclick=()=>saveProposal(id,false);
   document.getElementById("pSaveOpen").onclick=()=>saveProposal(id,true);
+  const _pm=document.getElementById("pEmail");
+  if(_pm)_pm.onclick=async()=>{const pid=EDIT&&EDIT.id;if(!pid)return;await saveProposal(id,false);emailProposalPdf(pid);};
   document.getElementById("pPreview").onclick=()=>previewProposal();
   const _psum=document.getElementById("pSummary");if(_psum)_psum.onclick=()=>materialsSummaryPrint(EDIT);
   document.getElementById("addBom").onclick=()=>{EDIT.bom.push({title:"New Group",price:0,lines:""});renderBomBox();bindBom();recalcBar();};
@@ -3552,6 +3555,89 @@ function openProposal(id){
   logAudit("read","proposal",p.clientName,"Opened proposal");
 }
 function previewProposal(){if(!EDIT){alert("Nothing to preview yet.");return;}renderProposalPrint(EDIT,true);}
+/* ===== PROPOSAL → PDF → CLIENT'S INBOX =====
+   One tap turns a finished proposal into a real PDF and emails it to the
+   address saved on the client — no print dialog, no manual attaching.
+   - The PDF engine (html2pdf: html2canvas + jsPDF, vendored at
+     /html2pdf.bundle.min.js, ~900 KB) is loaded LAZILY on first use, so
+     normal page loads carry zero extra weight.
+   - proposalPages(p) is already a pure 3-page A4 builder with every image
+     inline base64, so it renders faithfully in an offscreen host div that
+     inherits the app's own stylesheets.
+   - Success marks a Draft proposal "Sent" and stamps who/when/where it was
+     emailed; failures are honest and change nothing. */
+let _pdfLibP=null;
+function loadPdfLib(){
+  if(window.html2pdf)return Promise.resolve();
+  if(_pdfLibP)return _pdfLibP;
+  _pdfLibP=new Promise((res,rej)=>{
+    const s=document.createElement("script");
+    s.src="html2pdf.bundle.min.js";
+    s.onload=()=>res();
+    s.onerror=()=>{_pdfLibP=null;s.remove();rej(new Error("the PDF engine could not be loaded — check the connection and try again"));};
+    document.head.appendChild(s);
+  });
+  return _pdfLibP;
+}
+async function proposalPdfBlob(p){
+  await loadPdfLib();
+  try{await document.fonts.ready;}catch(e){}
+  /* Offscreen host inside the main document: it inherits the same .page /
+     .ppage CSS the print overlay uses, fonts are already loaded, and every
+     image on the proposal is an inline data URI — nothing to wait for. */
+  const host=document.createElement("div");
+  host.style.cssText="position:absolute;left:-12000px;top:0;background:#fff;width:210mm";
+  host.innerHTML='<div class="pages" style="display:block">'+proposalPages(p)+'</div>';
+  document.body.appendChild(host);
+  try{
+    await new Promise(r=>setTimeout(r,150));   // one layout pass for the injected pages
+    return await html2pdf().set({
+      margin:0,
+      image:{type:"jpeg",quality:0.92},
+      html2canvas:{scale:2,useCORS:true,logging:false,backgroundColor:"#ffffff"},
+      jsPDF:{unit:"mm",format:"a4",orientation:"portrait"},
+      pagebreak:{mode:["css"],after:".page"}
+    }).from(host.firstChild).outputPdf("blob");
+  }finally{host.remove();}
+}
+async function emailProposalPdf(id){
+  const p=DB.proposals.find(x=>x.id===id);if(!p)return;
+  const c=DB.clients.find(x=>x.id===p.clientId)||DB.clients.find(x=>x.name===p.clientName);
+  const to=((c&&c.email)||"").trim();
+  if(!to){toast("No email on file for "+(p.clientName||"this client")+" — add the client's email address in Clients / CRM first.","error");return;}
+  const t=propTotals(p);
+  if(!await uiConfirm(`Email proposal #${p.propNo||""} as a PDF (3 pages · ${peso(t.final)}) to ${p.clientName} at ${to}?`,{okLabel:"Generate & send",cancelLabel:"Not yet",danger:false}))return;
+  toast("Generating the PDF…");
+  let blob;
+  try{blob=await proposalPdfBlob(p);}
+  catch(e){toast("Could not generate the PDF: "+((e&&e.message)||"unknown error"),"error");return;}
+  const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(",")[1]||"");r.onerror=rej;r.readAsDataURL(blob);});
+  const fname="Gleenergy Solar Proposal "+(p.propNo||"")+".pdf";
+  const bodyText=`Dear ${p.salutation||p.clientName},\n\nThank you for considering Gleenergy Renewables. Attached is your solar proposal ${p.propNo?("#"+p.propNo+" "):""}with the full system details, bill of materials and payment terms${p.pvKwp?` for the proposed ${p.pvKwp} kWp system`:""}.\n\nWe're happy to walk you through it — just reply to this email or reach us anytime.\n\nBest regards,\n${p.repName||user.name}\n${p.company||"Gleenergy Renewables Company"}`;
+  toast("Sending to "+to+"… ("+Math.round(blob.size/1024)+" KB)");
+  const base=(window.GLEENERGY_API||"/api/storage").replace(/\/storage\/?$/,"");
+  let sent=false,errMsg="";
+  try{
+    const r=await fetch(base+"/send-email",{method:"POST",headers:window.gleenergyHeaders(),
+      body:JSON.stringify({to,subject:"Your solar proposal "+(p.propNo?("#"+p.propNo+" "):"")+"— Gleenergy Renewables",body:bodyText,
+        attachments:[{filename:fname,b64,mime:"application/pdf"}]})});
+    const d=await r.json().catch(()=>({}));
+    if(r.ok&&d&&d.ok)sent=true;else errMsg=(d&&d.error)||("HTTP "+r.status);
+  }catch(e){errMsg="No connection to the server.";}
+  if(!sent){toast("Proposal not emailed: "+errMsg,"error");return;}
+  /* refresh-before-write on the shared proposals array, then stamp the send —
+     and a Draft that just went to the client is, by definition, Sent. */
+  DB.proposals=await loadKey(K.prop,DB.proposals)||DB.proposals;
+  const rec=DB.proposals.find(x=>x.id===p.id);
+  if(rec){
+    rec.emailedAt=new Date().toISOString();rec.emailedTo=to;rec.emailedBy=user.name;
+    if(rec.status==="Draft")rec.status="Sent";
+    await saveKey(K.prop,DB.proposals);
+  }
+  await logAudit("send","proposal",p.clientName,`PDF emailed to ${to} (${Math.round(blob.size/1024)} KB)`);
+  toast("Proposal PDF sent to "+to,"ok");
+  if(currentView==="proposals")viewProposals();
+}
 
 /* ============ FOLLOW-UPS ============ */
 let engTestMode=false;
