@@ -349,7 +349,64 @@ def _load_json(path):
 # ----------------------------------------------------------------------
 # Email sender (plain function; the route below just wraps it).
 # SMS/Semaphore was removed 2026-08 — outreach is email-only.
+# Two transports: classic Gmail SMTP, or Brevo's HTTPS API when
+# email_config.json says "provider": "brevo" (rides port 443, so nothing
+# in the hosting layer can throttle it — the durable choice for automated
+# outreach from cloud servers).
 # ----------------------------------------------------------------------
+def _send_via_brevo(cfg, to, subject, text, decoded):
+    import urllib.request
+    import urllib.error
+
+    key = str(cfg.get("brevo_api_key") or "").strip()
+    if not key:
+        return JSONResponse(
+            {"ok": False, "error": 'Brevo is selected but brevo_api_key is missing — add it to email_config.json (Brevo dashboard → SMTP & API → API Keys).'},
+            status_code=400,
+        )
+    sender_email = str(cfg.get("from_email") or cfg.get("smtp_user") or "").strip()
+    if not sender_email:
+        return JSONResponse({"ok": False, "error": "from_email is missing in email_config.json — Brevo needs a verified sender address."}, status_code=400)
+    payload = {
+        "sender": {"name": cfg.get("from_name") or "Gleenergy Renewables Company", "email": sender_email},
+        "to": [{"email": to}],
+        "subject": subject,
+        "textContent": text,
+    }
+    rt = str(cfg.get("reply_to") or "").strip()
+    if rt:
+        payload["replyTo"] = {"email": rt}
+    for fld in ("cc", "bcc"):
+        vals = [x.strip() for x in str(cfg.get(fld) or "").split(",") if x.strip()]
+        if vals:
+            payload[fld] = [{"email": x} for x in vals]
+    if decoded:
+        payload["attachment"] = [{"name": n, "content": base64.b64encode(d).decode()} for (n, m, d) in decoded]
+    req = urllib.request.Request(
+        "https://api.brevo.com/v3/smtp/email",
+        data=json.dumps(payload).encode("utf-8"),
+        method="POST",
+        headers={"api-key": key, "Content-Type": "application/json", "Accept": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=30):
+            pass
+        return {"ok": True, "to": to, "via": "brevo"}
+    except urllib.error.HTTPError as e:
+        detail = ""
+        try:
+            detail = str(json.loads(e.read().decode("utf-8", "ignore")).get("message") or "")[:220]
+        except Exception:
+            pass
+        print(f"[send-email] brevo {e.code}: {detail!r}")
+        if e.code == 401:
+            return JSONResponse({"ok": False, "error": "Brevo rejected the API key — re-check brevo_api_key in email_config.json (Brevo → SMTP & API → API Keys, key starts with xkeysib-)."}, status_code=500)
+        return JSONResponse({"ok": False, "error": f"Brevo did not accept the email ({e.code}): {detail or 'see the server log'}"}, status_code=500)
+    except Exception as e:
+        print(f"[send-email] brevo failed: {e!r}")
+        return JSONResponse({"ok": False, "error": "Could not reach Brevo — network hiccup; try again in a moment."}, status_code=500)
+
+
 def _send_email(body: EmailBody):
     to = (body.to or "").strip()
     subject = body.subject or "(no subject)"
@@ -432,6 +489,14 @@ def _send_email(body: EmailBody):
                        + [(n, m, d) for (n, m, d) in decoded if (m or "").lower() != "application/pdf"])
         except ImportError:
             print("[send-email] pypdf not installed - sending attachments separately")
+
+    # ---- Transport choice -------------------------------------------------
+    # "provider": "brevo" in email_config.json sends over Brevo's HTTPS API
+    # (port 443 — immune to the SMTP throttling Gmail applies to shared cloud
+    # servers). Anything else (or nothing) uses the classic Gmail SMTP path.
+    provider = str(cfg.get("provider") or "").strip().lower()
+    if provider == "brevo":
+        return _send_via_brevo(cfg, to, subject, text, decoded)
 
     for name, mime, data in decoded:
         maintype, _, subtype = mime.partition("/")

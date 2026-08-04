@@ -171,6 +171,35 @@ Notes:
     with the file can send mail as you.
   - Other SMTP providers work too (Outlook/Office365, Zoho, your host's
     mail server) — just use their host/port and your mailbox login.
+  - If Gmail cuts off sends from the cloud server (SMTPServerDisconnected),
+    the system automatically retries once over SSL port 465; setting
+    "smtp_port": 465 makes that route the default.
+
+-----------------------------------------------------------------------
+OPTION B — SENDING VIA BREVO (HTTPS, recommended for the cloud)
+-----------------------------------------------------------------------
+Brevo (https://brevo.com, free tier 300 emails/day) sends over HTTPS
+port 443, which no hosting provider throttles — the durable choice for
+automated outreach. To switch the system to Brevo:
+
+  1. In Brevo: check that your sender address is verified
+     (Senders, Domains & Dedicated IPs → Senders — the signup email is
+     verified automatically).
+  2. In Brevo: profile menu → SMTP & API → "API Keys" tab → Generate a
+     new API key (name it "Gleenergy ERP") and copy the xkeysib-... value
+     — it is shown only once.
+  3. Add TWO lines to email_config.json (keep everything else; on the
+     cloud this is the Render Secret File):
+       "provider": "brevo",
+       "brevo_api_key": "xkeysib-PASTE-YOURS-HERE",
+     from_email must be the verified Brevo sender.
+  4. Save (Render redeploys ~1 min) and send a test proposal.
+
+  - To go back to Gmail SMTP: remove the two lines (or set
+    "provider": "smtp").
+  - Until you verify a custom company DOMAIN in Brevo, recipients may see
+    "via brevo.com" next to the sender — verifying the domain (once you
+    have one) removes that and improves deliverability.
 
 -----------------------------------------------------------------------
 SMS — REMOVED (2026-08)
