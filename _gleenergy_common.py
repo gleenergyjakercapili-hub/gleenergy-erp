@@ -778,8 +778,27 @@ def install_shared(app, auth_db=None):
         return _parse_xlsx(body)
 
     @app.get("/api/health")
-    def health():
-        return {"ok": True, "protected": True}   # sessions always guard the API
+    def health(diag: str = ""):
+        out = {"ok": True, "protected": True}    # sessions always guard the API
+        if diag == "email":
+            # Egress diagnostic: can THIS server open the mail ports at all?
+            # Reveals only reachability (no credentials touched) — added when a
+            # correct Gmail config failed at the connection stage on the cloud.
+            import socket
+            import time as _t
+
+            def _probe(h, p):
+                t0 = _t.time()
+                try:
+                    with socket.create_connection((h, p), timeout=6):
+                        return {"reachable": True, "ms": int((_t.time() - t0) * 1000)}
+                except Exception as e:
+                    return {"reachable": False, "error": f"{type(e).__name__}: {e}"[:140]}
+
+            out["smtp_587"] = _probe("smtp.gmail.com", 587)
+            out["smtp_465"] = _probe("smtp.gmail.com", 465)
+            out["https_443_control"] = _probe("www.google.com", 443)
+        return out
 
     @app.get("/")
     def index():
