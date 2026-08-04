@@ -3696,9 +3696,13 @@ function emailProposalPdf(id){
     ? specs.map(d=>`<label style="display:flex;align-items:center;gap:9px;padding:7px 2px;font-size:12.5px;cursor:pointer;border-bottom:1px solid #f3f0fa"><input type="checkbox" class="pm-spec" value="${d.id}" data-size="${+d.size||0}" ${_std.indexOf(d.id)>-1?"checked":""}><span style="flex:1">${esc(d.name)}${_std.indexOf(d.id)>-1?' <span style="font-size:10px;color:var(--brand);font-weight:700">Standard</span>':""}</span><span style="color:var(--muted);font-size:11px;white-space:nowrap">${((+d.size||0)/1024).toFixed(0)} KB</span></label>`).join("")
     : `<div style="font-size:12px;color:var(--muted);padding:4px 0">No spec sheets in the library yet. Upload the manufacturer PDFs (panels, inverters, batteries) in <b>Proposals → Design settings</b> — or in Documents under category <b>${SPEC_CAT}</b> — and they'll be listed here to tick.</div>`;
   openModal("Email proposal to client",`
-    <div style="font-size:13px;margin-bottom:10px">Proposal <b>#${esc(p.propNo||"")}</b> — 3-page PDF · ${peso(t.final)} — will be emailed to <b>${esc(p.clientName)}</b> at <b>${esc(to)}</b>. The proposal and the ticked sheets below are merged into <b>one consolidated PDF</b>.</div>
+    <div style="font-size:13px;margin-bottom:10px">Proposal <b>#${esc(p.propNo||"")}</b> — 3-page PDF · ${peso(t.final)} — will be emailed to <b>${esc(p.clientName)}</b> at <b>${esc(to)}</b>.</div>
     <div class="sec-h">Product spec sheets in the package <span style="font-weight:400;color:var(--muted)">(Standard sheets pre-ticked · manage in Design settings)</span></div>
     <div style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px 12px;margin-bottom:6px">${specRows}</div>
+    <div class="fg" style="margin:10px 0 4px"><label>Delivery format</label>
+      <label style="display:flex;gap:8px;align-items:flex-start;padding:5px 2px;font-size:12.5px;cursor:pointer"><input type="radio" name="pmFmt" value="merge" checked><span><b>One combined PDF</b> — the proposal and the ticked sheets merged into a single document</span></label>
+      <label style="display:flex;gap:8px;align-items:flex-start;padding:5px 2px;font-size:12.5px;cursor:pointer"><input type="radio" name="pmFmt" value="separate"><span><b>Separate files</b> — the proposal PDF plus each spec sheet as its own attachment, like the team's classic Gmail sends</span></label>
+    </div>
     <div id="pmTotal" style="font-size:11px;color:var(--muted);margin-bottom:8px">Attachments: the proposal PDF (~1 MB)</div>
     <div style="font-size:12px;color:var(--muted)">After sending, <b>${esc(p.clientName)}</b> is enrolled in the <b>${PROP_FU_NAME}</b> sequence — reminders appear in Follow-ups on day 2, 5 and 10 so the team never loses track of a recipient.</div>`,
     [["Not yet","btn-out",closeModal],["Generate & send","btn-primary",async()=>{
@@ -3707,8 +3711,9 @@ function emailProposalPdf(id){
       const chosen=specs.filter(d=>sel.indexOf(d.id)>-1);
       const est=chosen.reduce((s,d)=>s+(+d.size||0),0);
       if(est>13*1024*1024){alert("Those spec sheets total over 13 MB — untick some so the email stays under the 15 MB limit.");return;}
+      const merge=((document.querySelector('input[name="pmFmt"]:checked')||{}).value)!=="separate";
       closeModal();
-      _sendProposalEmail(p,c,to,chosen);
+      _sendProposalEmail(p,c,to,chosen,merge);
     }]]);
   const _upd=()=>{const cbs=[...document.querySelectorAll(".pm-spec:checked")];const tot=cbs.reduce((s,e)=>s+(+e.dataset.size||0),0);
     const el=document.getElementById("pmTotal");if(!el)return;
@@ -3721,7 +3726,8 @@ function emailProposalPdf(id){
 /* Branded HTML body for the proposal email — email-safe (inline styles,
    tables, no external images/fonts: mail clients block those), matching the
    company violet + gold. Plain text remains the fallback for strict clients. */
-function proposalEmailHTML(p,t,hasSpecs){
+function proposalEmailHTML(p,t,hasSpecs,merge){
+  merge=merge!==false;
   return `<!doctype html><html><body style="margin:0;padding:0;background:#f4f2f9">
   <div style="max-width:600px;margin:0 auto;font-family:Arial,Helvetica,sans-serif;color:#2a2540">
     <div style="background:#4b2a85;padding:26px 30px">
@@ -3730,7 +3736,7 @@ function proposalEmailHTML(p,t,hasSpecs){
     </div>
     <div style="background:#ffffff;padding:28px 30px">
       <p style="margin:0 0 14px;font-size:15px">Dear <b>${esc(p.salutation||p.clientName)}</b>,</p>
-      <p style="margin:0 0 18px;font-size:14px;line-height:1.6">Thank you for considering solar with us. Your personalised proposal is ready — the complete document${hasSpecs?" together with the manufacturer specification sheets":""} is attached to this email as a single PDF.</p>
+      <p style="margin:0 0 18px;font-size:14px;line-height:1.6">Thank you for considering solar with us. Your personalised proposal is ready — ${hasSpecs?(merge?"the complete document together with the manufacturer specification sheets is attached to this email as a single PDF":"the proposal is attached to this email, together with the manufacturer specification sheets as individual files"):"the complete document is attached to this email as a PDF"}.</p>
       <table style="width:100%;border-collapse:collapse;background:#f7f4fc;border-radius:8px" cellpadding="0" cellspacing="0">
         <tr><td style="padding:16px 18px 6px;font-size:11px;color:#7a7390;text-transform:uppercase;letter-spacing:1px">Proposal ${esc(p.propNo?("#"+p.propNo):"")}</td></tr>
         ${p.pvKwp?`<tr><td style="padding:2px 18px;font-size:14px">Solar system: <b>${esc(p.pvKwp)} kWp${(p.batteryKwh&&+p.batteryKwh)?` · ${esc(p.batteryKwh)} kWh battery`:""}</b></td></tr>`:""}
@@ -3742,7 +3748,8 @@ function proposalEmailHTML(p,t,hasSpecs){
     <div style="padding:14px 30px;font-size:11px;color:#9a93ad;text-align:center">Prepared for ${esc(p.clientName)}${p.date?` · ${esc(p.date)}`:""} · figures remain subject to final site validation.</div>
   </div></body></html>`;
 }
-async function _sendProposalEmail(p,c,to,specDocs){
+async function _sendProposalEmail(p,c,to,specDocs,merge){
+  merge=merge!==false;   /* combined PDF is the default delivery format */
   toast("Generating the PDF…");
   let blob;
   try{blob=await proposalPdfBlob(p);}
@@ -3762,15 +3769,15 @@ async function _sendProposalEmail(p,c,to,specDocs){
   }
   const totalKB=Math.round((blob.size+(specDocs||[]).reduce((s,d)=>s+(+d.size||0),0))/1024);
   const hasSpecs=specDocs&&specDocs.length>0;
-  const bodyText=`Dear ${p.salutation||p.clientName},\n\nThank you for considering Gleenergy Renewables. Attached is your solar proposal ${p.propNo?("#"+p.propNo+" "):""}with the full system details, bill of materials and payment terms${p.pvKwp?` for the proposed ${p.pvKwp} kWp system`:""}.${hasSpecs?"\n\nThe attached document also includes the manufacturer specification sheets for the proposed equipment, for your reference.":""}\n\nWe're happy to walk you through it — just reply to this email or reach us anytime.\n\nBest regards,\n${p.repName||user.name}\n${p.company||"Gleenergy Renewables Company"}`;
-  toast("Sending to "+to+"… ("+totalKB+" KB"+(hasSpecs?", one consolidated PDF":"")+")");
+  const bodyText=`Dear ${p.salutation||p.clientName},\n\nThank you for considering Gleenergy Renewables. Attached is your solar proposal ${p.propNo?("#"+p.propNo+" "):""}with the full system details, bill of materials and payment terms${p.pvKwp?` for the proposed ${p.pvKwp} kWp system`:""}.${hasSpecs?(merge?"\n\nThe attached document also includes the manufacturer specification sheets for the proposed equipment, for your reference.":"\n\nThe manufacturer specification sheets for the proposed equipment are attached as individual files, for your reference."):""}\n\nWe're happy to walk you through it — just reply to this email or reach us anytime.\n\nBest regards,\n${p.repName||user.name}\n${p.company||"Gleenergy Renewables Company"}`;
+  toast("Sending to "+to+"… ("+totalKB+" KB"+(hasSpecs?(merge?", one consolidated PDF":", "+attachments.length+" files"):"")+")");
   const base=(window.GLEENERGY_API||"/api/storage").replace(/\/storage\/?$/,"");
   let sent=false,errMsg="";
   try{
     const r=await fetch(base+"/send-email",{method:"POST",headers:window.gleenergyHeaders(),
       body:JSON.stringify({to,subject:"Your solar proposal "+(p.propNo?("#"+p.propNo+" "):"")+"— Gleenergy Renewables",body:bodyText,
-        html:proposalEmailHTML(p,propTotals(p),hasSpecs),attachments,
-        consolidate:true,merged_name:"Gleenergy Solar Proposal "+(p.propNo||"")+" - Complete.pdf"})});
+        html:proposalEmailHTML(p,propTotals(p),hasSpecs,merge),attachments,
+        consolidate:merge,merged_name:"Gleenergy Solar Proposal "+(p.propNo||"")+" - Complete.pdf"})});
     const d=await r.json().catch(()=>({}));
     if(r.ok&&d&&d.ok)sent=true;else errMsg=(d&&d.error)||("HTTP "+r.status);
   }catch(e){errMsg="No connection to the server.";}
@@ -3784,7 +3791,7 @@ async function _sendProposalEmail(p,c,to,specDocs){
     if(rec.status==="Draft")rec.status="Sent";
     await saveKey(K.prop,DB.proposals);
   }
-  await logAudit("send","proposal",p.clientName,`PDF emailed to ${to} (${totalKB} KB${attachments.length>1?`, consolidated from ${attachments.length} files`:""})`);
+  await logAudit("send","proposal",p.clientName,`PDF emailed to ${to} (${totalKB} KB${attachments.length>1?(merge?`, consolidated from ${attachments.length} files`:`, ${attachments.length} separate files`):""})`);
   /* Route the recipient into Follow-ups so the sales team monitors them:
      enroll in the Proposal Follow-Up sequence unless already actively in it. */
   let fuNote="";
