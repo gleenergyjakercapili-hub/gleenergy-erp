@@ -3600,27 +3600,85 @@ async function proposalPdfBlob(p){
     }).from(host.firstChild).outputPdf("blob");
   }finally{host.remove();}
 }
-async function emailProposalPdf(id){
+/* Product spec sheets (panels, inverters, batteries) live in Documents under
+   this category — upload the manufacturer PDFs once, tick them per send. */
+const SPEC_CAT="Product Specs";
+/* The "Proposal Follow-Up" sequence every emailed proposal enrolls into, so
+   the sales team monitors each recipient from the Follow-ups screen. Created
+   on demand (refresh-before-write) if nobody has made it yet; finding an
+   existing template by name means the team can freely edit its steps. */
+const PROP_FU_NAME="Proposal Follow-Up";
+async function ensureProposalFuSeq(){
+  DB.sequences=await loadKey(K.seq,DB.sequences)||DB.sequences;
+  const have=(DB.sequences||[]).find(x=>(x.name||"").toLowerCase()===PROP_FU_NAME.toLowerCase());
+  if(have)return have.id;
+  const s={id:uid(),name:PROP_FU_NAME,steps:[
+    {offsetDays:2,channel:"Email",subject:"Did your solar proposal arrive safely?",message:"Hi {client}, just making sure the solar proposal we emailed reached you. If anything is unclear, reply here and we'll gladly walk you through it."},
+    {offsetDays:5,channel:"Email",subject:"Any questions about your solar proposal?",message:"Hi {client}, have you had a chance to review your solar proposal? We're happy to adjust the system size or the payment terms to fit your needs."},
+    {offsetDays:10,channel:"Email",subject:"Shall we schedule your site visit?",message:"Hi {client}, following up on your solar proposal — shall we schedule a quick site visit so you can see the exact plan for your roof? Just reply with a day that suits you."}
+  ]};
+  DB.sequences.push(s);await saveKey(K.seq,DB.sequences);
+  await logAudit("create","sequence",PROP_FU_NAME,"Created automatically for proposal follow-ups");
+  return s.id;
+}
+function emailProposalPdf(id){
   const p=DB.proposals.find(x=>x.id===id);if(!p)return;
   const c=DB.clients.find(x=>x.id===p.clientId)||DB.clients.find(x=>x.name===p.clientName);
   const to=((c&&c.email)||"").trim();
   if(!to){toast("No email on file for "+(p.clientName||"this client")+" — add the client's email address in Clients / CRM first.","error");return;}
   const t=propTotals(p);
-  if(!await uiConfirm(`Email proposal #${p.propNo||""} as a PDF (3 pages · ${peso(t.final)}) to ${p.clientName} at ${to}?`,{okLabel:"Generate & send",cancelLabel:"Not yet",danger:false}))return;
+  const specs=(DB.documents||[]).filter(d=>d.category===SPEC_CAT&&/\.pdf$/i.test(d.name||"")).sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  const specRows=specs.length
+    ? specs.map(d=>`<label style="display:flex;align-items:center;gap:9px;padding:7px 2px;font-size:12.5px;cursor:pointer;border-bottom:1px solid #f3f0fa"><input type="checkbox" class="pm-spec" value="${d.id}" data-size="${+d.size||0}"><span style="flex:1">${esc(d.name)}</span><span style="color:var(--muted);font-size:11px;white-space:nowrap">${((+d.size||0)/1024).toFixed(0)} KB</span></label>`).join("")
+    : `<div style="font-size:12px;color:var(--muted);padding:4px 0">No spec sheets in the library yet. Upload the manufacturer PDFs (panels, inverters, batteries) in <b>Documents</b> under category <b>${SPEC_CAT}</b> and they'll be listed here to tick.</div>`;
+  openModal("Email proposal to client",`
+    <div style="font-size:13px;margin-bottom:10px">Proposal <b>#${esc(p.propNo||"")}</b> — 3-page PDF · ${peso(t.final)} — will be emailed to <b>${esc(p.clientName)}</b> at <b>${esc(to)}</b>.</div>
+    <div class="sec-h">Attach product spec sheets <span style="font-weight:400;color:var(--muted)">(optional · up to 9 · from Documents → ${SPEC_CAT})</span></div>
+    <div style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px 12px;margin-bottom:6px">${specRows}</div>
+    <div id="pmTotal" style="font-size:11px;color:var(--muted);margin-bottom:8px">Attachments: the proposal PDF (~1 MB)</div>
+    <div style="font-size:12px;color:var(--muted)">After sending, <b>${esc(p.clientName)}</b> is enrolled in the <b>${PROP_FU_NAME}</b> sequence — reminders appear in Follow-ups on day 2, 5 and 10 so the team never loses track of a recipient.</div>`,
+    [["Not yet","btn-out",closeModal],["Generate & send","btn-primary",async()=>{
+      const sel=[...document.querySelectorAll(".pm-spec:checked")].map(cb=>cb.value);
+      if(sel.length>9){alert("Choose up to 9 spec sheets — an email carries at most 10 attachments including the proposal.");return;}
+      const chosen=specs.filter(d=>sel.indexOf(d.id)>-1);
+      const est=chosen.reduce((s,d)=>s+(+d.size||0),0);
+      if(est>13*1024*1024){alert("Those spec sheets total over 13 MB — untick some so the email stays under the 15 MB limit.");return;}
+      closeModal();
+      _sendProposalEmail(p,c,to,chosen);
+    }]]);
+  const _upd=()=>{const cbs=[...document.querySelectorAll(".pm-spec:checked")];const tot=cbs.reduce((s,e)=>s+(+e.dataset.size||0),0);
+    const el=document.getElementById("pmTotal");if(!el)return;
+    el.textContent="Attachments: the proposal PDF (~1 MB)"+(cbs.length?` + ${cbs.length} spec sheet${cbs.length>1?"s":""} (${(tot/1024/1024).toFixed(1)} MB)`:"");
+    el.style.color=(tot>13*1024*1024)?"var(--red)":"var(--muted)";
+    if(tot>13*1024*1024)el.textContent+=" — over the email size limit, untick some";};
+  document.querySelectorAll(".pm-spec").forEach(cb=>cb.onchange=_upd);
+}
+async function _sendProposalEmail(p,c,to,specDocs){
   toast("Generating the PDF…");
   let blob;
   try{blob=await proposalPdfBlob(p);}
   catch(e){toast("Could not generate the PDF: "+((e&&e.message)||"unknown error"),"error");return;}
   const b64=await new Promise((res,rej)=>{const r=new FileReader();r.onload=()=>res(String(r.result).split(",")[1]||"");r.onerror=rej;r.readAsDataURL(blob);});
-  const fname="Gleenergy Solar Proposal "+(p.propNo||"")+".pdf";
-  const bodyText=`Dear ${p.salutation||p.clientName},\n\nThank you for considering Gleenergy Renewables. Attached is your solar proposal ${p.propNo?("#"+p.propNo+" "):""}with the full system details, bill of materials and payment terms${p.pvKwp?` for the proposed ${p.pvKwp} kWp system`:""}.\n\nWe're happy to walk you through it — just reply to this email or reach us anytime.\n\nBest regards,\n${p.repName||user.name}\n${p.company||"Gleenergy Renewables Company"}`;
-  toast("Sending to "+to+"… ("+Math.round(blob.size/1024)+" KB)");
+  const attachments=[{filename:"Gleenergy Solar Proposal "+(p.propNo||"")+".pdf",b64,mime:"application/pdf"}];
+  /* Pull each ticked spec sheet from its Documents blob (raw dataURL). A file
+     that fails to load aborts the send — silently emailing an incomplete set
+     is worse than asking the user to retry. */
+  for(const d of (specDocs||[])){
+    try{
+      const r=await window.storage.get("p2:docfile:"+d.id,true);
+      const v=(r&&r.value)||"";
+      if(!v){toast("Could not load spec sheet \""+(d.name||"?")+"\" — try again, or untick it.","error");return;}
+      attachments.push({filename:d.name||"spec.pdf",b64:v.split(",")[1]||"",mime:"application/pdf"});
+    }catch(e){toast("Could not load spec sheet \""+(d.name||"?")+"\" — try again, or untick it.","error");return;}
+  }
+  const totalKB=Math.round((blob.size+(specDocs||[]).reduce((s,d)=>s+(+d.size||0),0))/1024);
+  const bodyText=`Dear ${p.salutation||p.clientName},\n\nThank you for considering Gleenergy Renewables. Attached is your solar proposal ${p.propNo?("#"+p.propNo+" "):""}with the full system details, bill of materials and payment terms${p.pvKwp?` for the proposed ${p.pvKwp} kWp system`:""}.${specDocs&&specDocs.length?"\n\nWe have also attached the product specification sheets for the proposed equipment, for your reference.":""}\n\nWe're happy to walk you through it — just reply to this email or reach us anytime.\n\nBest regards,\n${p.repName||user.name}\n${p.company||"Gleenergy Renewables Company"}`;
+  toast("Sending to "+to+"… ("+totalKB+" KB, "+attachments.length+" file"+(attachments.length>1?"s":"")+")");
   const base=(window.GLEENERGY_API||"/api/storage").replace(/\/storage\/?$/,"");
   let sent=false,errMsg="";
   try{
     const r=await fetch(base+"/send-email",{method:"POST",headers:window.gleenergyHeaders(),
-      body:JSON.stringify({to,subject:"Your solar proposal "+(p.propNo?("#"+p.propNo+" "):"")+"— Gleenergy Renewables",body:bodyText,
-        attachments:[{filename:fname,b64,mime:"application/pdf"}]})});
+      body:JSON.stringify({to,subject:"Your solar proposal "+(p.propNo?("#"+p.propNo+" "):"")+"— Gleenergy Renewables",body:bodyText,attachments})});
     const d=await r.json().catch(()=>({}));
     if(r.ok&&d&&d.ok)sent=true;else errMsg=(d&&d.error)||("HTTP "+r.status);
   }catch(e){errMsg="No connection to the server.";}
@@ -3634,8 +3692,23 @@ async function emailProposalPdf(id){
     if(rec.status==="Draft")rec.status="Sent";
     await saveKey(K.prop,DB.proposals);
   }
-  await logAudit("send","proposal",p.clientName,`PDF emailed to ${to} (${Math.round(blob.size/1024)} KB)`);
-  toast("Proposal PDF sent to "+to,"ok");
+  await logAudit("send","proposal",p.clientName,`PDF emailed to ${to} (${totalKB} KB, ${attachments.length} file${attachments.length>1?"s":""})`);
+  /* Route the recipient into Follow-ups so the sales team monitors them:
+     enroll in the Proposal Follow-Up sequence unless already actively in it. */
+  let fuNote="";
+  try{
+    const seqId=await ensureProposalFuSeq();
+    DB.enrollments=await loadKey(K.enr,DB.enrollments)||DB.enrollments;
+    const already=DB.enrollments.some(e=>e.status==="Active"&&e.sequenceId===seqId&&((c&&e.clientId===c.id)||e.clientName===p.clientName));
+    if(!already){
+      DB.enrollments.unshift({id:uid(),clientId:(c&&c.id)||p.clientId||"",clientName:p.clientName,sequenceId:seqId,start:todayStr(),step:0,status:"Active",log:[]});
+      await saveKey(K.enr,DB.enrollments);
+      await logAudit("create","follow-up",p.clientName,"Auto-enrolled in "+PROP_FU_NAME+" after the proposal was emailed");
+      fuNote=" — enrolled in "+PROP_FU_NAME;
+    }else fuNote=" — already in "+PROP_FU_NAME;
+  }catch(e){}
+  toast("Proposal PDF sent to "+to+fuNote,"ok");
+  buildNav();
   if(currentView==="proposals")viewProposals();
 }
 
@@ -4147,12 +4220,12 @@ function viewDocuments(){
   V().querySelectorAll("[data-del]").forEach(b=>b.onclick=()=>delDoc(b.dataset.del));
 }
 function docForm(){
-  openModal("Upload document",`<div class="fg"><label>File * (max ~1.5 MB in prototype)</label><input id="f_file" type="file"></div>
-  <div class="grid2"><div class="fg"><label>Category</label><select id="f_cat"><option>General</option><option>Contract</option><option>Plan / Drawing</option><option>Permit</option><option>Proposal</option><option>ID / Document</option></select></div>
+  openModal("Upload document",`<div class="fg"><label>File * (max ~3 MB — product spec PDFs welcome)</label><input id="f_file" type="file"></div>
+  <div class="grid2"><div class="fg"><label>Category</label><select id="f_cat"><option>General</option><option>Contract</option><option>Plan / Drawing</option><option>Permit</option><option>Proposal</option><option>Product Specs</option><option>ID / Document</option></select></div>
   <div class="fg"><label>Link to client</label><select id="f_link"><option value="">— None —</option>${DB.clients.map(c=>`<option>${esc(c.name)}</option>`).join("")}</select></div></div>`,
   [["Cancel","btn-out",closeModal],["Upload","btn-primary",async()=>{
     const fi=document.getElementById("f_file");if(!fi.files.length){alert("Choose a file.");return;}
-    const file=fi.files[0];if(file.size>1.5*1024*1024){alert("File too large for prototype (max ~1.5 MB).");return;}
+    const file=fi.files[0];if(file.size>3*1024*1024){alert("File too large (max ~3 MB). Compress large PDFs first — smaller files also email faster to clients.");return;}
     const rd=new FileReader();rd.onload=async ev=>{const id=uid();
       const ok=await rawSet("p2:docfile:"+id,ev.target.result);if(!ok){alert("Could not store the file right now — please try again in a moment.");return;}
       DB.documents.unshift({id,name:file.name,size:file.size,category:gv("f_cat"),linked:gv("f_link"),by:user.name,ts:new Date().toISOString()});

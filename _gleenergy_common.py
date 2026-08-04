@@ -383,10 +383,10 @@ def _send_email(body: EmailBody):
         msg["Bcc"] = bcc               # private copy (stripped before sending, but still delivered)
     msg.set_content(text)
 
-    # Attachments (e.g. the proposal PDF). Capped at 5 files / 15 MB total —
-    # most mail providers reject anything larger anyway.
+    # Attachments (e.g. the proposal PDF + product spec sheets). Capped at
+    # 10 files / 15 MB total — most mail providers reject anything larger.
     total = 0
-    for att in (body.attachments or [])[:5]:
+    for att in (body.attachments or [])[:10]:
         raw = (att.b64 or "").strip()
         if raw.lower().startswith("data:") and "," in raw:
             raw = raw.split(",", 1)[1]
