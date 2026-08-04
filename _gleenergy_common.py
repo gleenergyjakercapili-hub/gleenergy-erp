@@ -838,6 +838,25 @@ def install_shared(app, auth_db=None):
                     return {"ok": False, "failed_at": stage, "error": f"{type(e).__name__}: {e}"[:160]}
 
             out["smtp_handshake_587"] = _handshake("smtp.gmail.com", 587)
+
+            # Config sanity — SHAPE only, never values: is a password present,
+            # is it the App-Password length (16), does it carry stray spaces,
+            # does from_email match smtp_user. (All Gmail App Passwords are 16
+            # alphanumerics, so the length reveals nothing an attacker can use.)
+            cfg = {}
+            for _p in EMAIL_CONFIG_CANDIDATES:
+                cfg = _load_json(_p)
+                if cfg:
+                    break
+            pw = str(cfg.get("smtp_password") or "")
+            out["config"] = {
+                "found": bool(cfg),
+                "enabled": bool(cfg.get("enabled")),
+                "smtp_user_set": bool(str(cfg.get("smtp_user") or "").strip()),
+                "from_matches_user": str(cfg.get("from_email") or "").strip().lower() == str(cfg.get("smtp_user") or "").strip().lower(),
+                "password_chars": len(pw.replace(" ", "")),
+                "password_has_spaces": " " in pw.strip(),
+            }
         return out
 
     @app.get("/")
