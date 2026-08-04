@@ -1423,12 +1423,75 @@ function designCfgForm(){
    <div class="sec-h" style="margin-top:14px">Brand logos — Product Forecast (BOM page)</div>
    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">Upload your component-brand logos (e.g. Jinko, Deye, LVTOPSUN). Auto-resized &amp; saved immediately. With none uploaded, the page shows the default text names.</div>
    <div id="cfgLogos" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px"></div>
-   <div class="fg"><label>Add brand logo (PNG/JPG)</label><input id="d_logo" type="file" accept="image/*"></div>`,
+   <div class="fg"><label>Add brand logo (PNG/JPG)</label><input id="d_logo" type="file" accept="image/*"></div>
+   <div class="sec-h" style="margin-top:14px">Proposal email attachments — product spec sheets</div>
+   <div style="font-size:11px;color:var(--muted);margin-bottom:8px">The manufacturer PDF datasheets (panels, inverters, batteries) attached to proposal emails. Uploads are saved immediately and also appear in Documents under <b>Product Specs</b>. Tick <b>Standard</b> to pre-select a sheet on every proposal email — agents can still untick per send. The proposal and the ticked sheets are merged into <b>one consolidated PDF</b> before sending.</div>
+   <div id="cfgSpecs" style="margin-bottom:8px"></div>
+   <div class="fg"><label>Add spec sheet (PDF, max ~3 MB)</label><input id="d_spec" type="file" accept="application/pdf"></div>`,
    [["Cancel","btn-out",closeModal],["Save","btn-primary",async()=>{
      const _SEGS=["Residential","Commercial","Industrial","Government"];const segmentCfg={};_SEGS.forEach(sg=>{segmentCfg[sg]={markup:(+gv("seg_"+sg+"_mk")||1),vat:(gv("seg_"+sg+"_vat")!==""?+gv("seg_"+sg+"_vat"):12)};});
      DB.designcfg={...DB.designcfg,psh:+gv("d_psh")||4.5,pr:+gv("d_pr")||0.8,rate:+gv("d_rate")||12,battRatio:+gv("d_batt")||1.5,offGridRatio:+gv("d_offb")||2.5,markup:+gv("d_mk")||1.4,labor:+gv("d_labor")||33531,commissionPct:(+gv("d_comm")||0),salesCommPct:(+gv("d_scomm")||0),segmentCfg,logos:(DB.designcfg&&DB.designcfg.logos)||[]};
      await saveKey(K.designcfg,DB.designcfg);await logAudit("update","settings","Design assumptions","Updated");closeModal();}]]);
-  renderCfgLogos();bindCfgLogoUpload();
+  renderCfgLogos();bindCfgLogoUpload();renderCfgSpecs();bindCfgSpecUpload();
+}
+/* ---- Product spec sheets manager (inside Design settings) ----
+   Same records as Documents → Product Specs, so both screens stay one truth.
+   "Standard" ids live in DB.designcfg.specDefaults and are pre-ticked on
+   every proposal email. Changes save immediately, like the brand logos. */
+function renderCfgSpecs(){
+  const box=document.getElementById("cfgSpecs");if(!box)return;
+  const specs=(DB.documents||[]).filter(d=>d.category===SPEC_CAT&&/\.pdf$/i.test(d.name||"")).sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  const std=(DB.designcfg&&DB.designcfg.specDefaults)||[];
+  box.innerHTML=specs.length?specs.map(d=>`<div style="display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid #f3f0fa;font-size:12.5px">
+      <span style="flex:1">${esc(d.name)}</span>
+      <span style="color:var(--muted);font-size:11px;white-space:nowrap">${((+d.size||0)/1024).toFixed(0)} KB</span>
+      <label style="display:flex;align-items:center;gap:5px;font-size:11px;font-weight:700;color:var(--brand);cursor:pointer"><input type="checkbox" data-specstd="${d.id}" ${std.indexOf(d.id)>-1?"checked":""}>Standard</label>
+      <button class="btn btn-light" data-specrm="${d.id}" style="height:26px;font-size:11px;padding:0 9px">Remove</button>
+    </div>`).join(""):'<span style="color:var(--muted);font-size:12px">No spec sheets yet — add the manufacturer PDFs below.</span>';
+  box.querySelectorAll("[data-specstd]").forEach(cb=>cb.onchange=async()=>{
+    if(!DB.designcfg)DB.designcfg=seedDesignCfg();
+    const list=(DB.designcfg.specDefaults||[]).filter(x=>x!==cb.dataset.specstd);
+    if(cb.checked)list.push(cb.dataset.specstd);
+    DB.designcfg.specDefaults=list;
+    await saveKey(K.designcfg,DB.designcfg);
+  });
+  box.querySelectorAll("[data-specrm]").forEach(b=>b.onclick=async()=>{
+    const d=(DB.documents||[]).find(x=>x.id===b.dataset.specrm);if(!d)return;
+    if(!await uiConfirm(`Remove spec sheet "${d.name}"? It disappears from proposal emails and from Documents.`))return;
+    DB.documents=await loadKey(K.doc,DB.documents)||DB.documents;
+    DB.documents=DB.documents.filter(x=>x.id!==d.id);
+    await saveKey(K.doc,DB.documents);
+    try{await window.storage.delete("p2:docfile:"+d.id,true);}catch(e){}
+    if(DB.designcfg&&DB.designcfg.specDefaults){DB.designcfg.specDefaults=DB.designcfg.specDefaults.filter(x=>x!==d.id);await saveKey(K.designcfg,DB.designcfg);}
+    await logAudit("delete","document",d.name,"Spec sheet removed from Design settings");
+    renderCfgSpecs();
+  });
+}
+function bindCfgSpecUpload(){
+  const inp=document.getElementById("d_spec");if(!inp)return;
+  inp.onchange=async e=>{
+    const f=e.target.files&&e.target.files[0];if(!f)return;
+    if(!/\.pdf$/i.test(f.name||"")&&f.type!=="application/pdf"){alert("Spec sheets must be PDF files.");inp.value="";return;}
+    if(f.size>3*1024*1024){alert("File too large (max ~3 MB). Compress the PDF first — smaller files also email faster to clients.");inp.value="";return;}
+    const rd=new FileReader();
+    rd.onload=async ev=>{
+      const docId=uid();
+      const ok=await rawSet("p2:docfile:"+docId,ev.target.result);
+      if(!ok){alert("Could not store the file right now — please try again in a moment.");return;}
+      DB.documents=await loadKey(K.doc,DB.documents)||DB.documents;   /* refresh-before-write */
+      DB.documents.unshift({id:docId,name:f.name,size:f.size,category:SPEC_CAT,linked:"",by:user.name,ts:new Date().toISOString()});
+      await saveKey(K.doc,DB.documents);
+      /* a new sheet joins the standard set — that's why it was uploaded;
+         untick Standard here if it should be per-send only */
+      if(!DB.designcfg)DB.designcfg=seedDesignCfg();
+      DB.designcfg.specDefaults=((DB.designcfg.specDefaults||[]).filter(x=>x!==docId)).concat([docId]);
+      await saveKey(K.designcfg,DB.designcfg);
+      await logAudit("create","document",f.name,"Spec sheet uploaded via Design settings");
+      inp.value="";renderCfgSpecs();
+      toast("Spec sheet added — it is now Standard on proposal emails.","ok");
+    };
+    rd.readAsDataURL(f);
+  };
 }
 function renderCfgLogos(){
   const box=document.getElementById("cfgLogos");if(!box)return;
@@ -3628,12 +3691,13 @@ function emailProposalPdf(id){
   if(!to){toast("No email on file for "+(p.clientName||"this client")+" — add the client's email address in Clients / CRM first.","error");return;}
   const t=propTotals(p);
   const specs=(DB.documents||[]).filter(d=>d.category===SPEC_CAT&&/\.pdf$/i.test(d.name||"")).sort((a,b)=>(a.name||"").localeCompare(b.name||""));
+  const _std=(DB.designcfg&&DB.designcfg.specDefaults)||[];
   const specRows=specs.length
-    ? specs.map(d=>`<label style="display:flex;align-items:center;gap:9px;padding:7px 2px;font-size:12.5px;cursor:pointer;border-bottom:1px solid #f3f0fa"><input type="checkbox" class="pm-spec" value="${d.id}" data-size="${+d.size||0}"><span style="flex:1">${esc(d.name)}</span><span style="color:var(--muted);font-size:11px;white-space:nowrap">${((+d.size||0)/1024).toFixed(0)} KB</span></label>`).join("")
-    : `<div style="font-size:12px;color:var(--muted);padding:4px 0">No spec sheets in the library yet. Upload the manufacturer PDFs (panels, inverters, batteries) in <b>Documents</b> under category <b>${SPEC_CAT}</b> and they'll be listed here to tick.</div>`;
+    ? specs.map(d=>`<label style="display:flex;align-items:center;gap:9px;padding:7px 2px;font-size:12.5px;cursor:pointer;border-bottom:1px solid #f3f0fa"><input type="checkbox" class="pm-spec" value="${d.id}" data-size="${+d.size||0}" ${_std.indexOf(d.id)>-1?"checked":""}><span style="flex:1">${esc(d.name)}${_std.indexOf(d.id)>-1?' <span style="font-size:10px;color:var(--brand);font-weight:700">Standard</span>':""}</span><span style="color:var(--muted);font-size:11px;white-space:nowrap">${((+d.size||0)/1024).toFixed(0)} KB</span></label>`).join("")
+    : `<div style="font-size:12px;color:var(--muted);padding:4px 0">No spec sheets in the library yet. Upload the manufacturer PDFs (panels, inverters, batteries) in <b>Proposals → Design settings</b> — or in Documents under category <b>${SPEC_CAT}</b> — and they'll be listed here to tick.</div>`;
   openModal("Email proposal to client",`
-    <div style="font-size:13px;margin-bottom:10px">Proposal <b>#${esc(p.propNo||"")}</b> — 3-page PDF · ${peso(t.final)} — will be emailed to <b>${esc(p.clientName)}</b> at <b>${esc(to)}</b>.</div>
-    <div class="sec-h">Attach product spec sheets <span style="font-weight:400;color:var(--muted)">(optional · up to 9 · from Documents → ${SPEC_CAT})</span></div>
+    <div style="font-size:13px;margin-bottom:10px">Proposal <b>#${esc(p.propNo||"")}</b> — 3-page PDF · ${peso(t.final)} — will be emailed to <b>${esc(p.clientName)}</b> at <b>${esc(to)}</b>. The proposal and the ticked sheets below are merged into <b>one consolidated PDF</b>.</div>
+    <div class="sec-h">Product spec sheets in the package <span style="font-weight:400;color:var(--muted)">(Standard sheets pre-ticked · manage in Design settings)</span></div>
     <div style="max-height:220px;overflow:auto;border:1px solid var(--line);border-radius:10px;padding:4px 12px;margin-bottom:6px">${specRows}</div>
     <div id="pmTotal" style="font-size:11px;color:var(--muted);margin-bottom:8px">Attachments: the proposal PDF (~1 MB)</div>
     <div style="font-size:12px;color:var(--muted)">After sending, <b>${esc(p.clientName)}</b> is enrolled in the <b>${PROP_FU_NAME}</b> sequence — reminders appear in Follow-ups on day 2, 5 and 10 so the team never loses track of a recipient.</div>`,
@@ -3652,6 +3716,7 @@ function emailProposalPdf(id){
     el.style.color=(tot>13*1024*1024)?"var(--red)":"var(--muted)";
     if(tot>13*1024*1024)el.textContent+=" — over the email size limit, untick some";};
   document.querySelectorAll(".pm-spec").forEach(cb=>cb.onchange=_upd);
+  _upd();
 }
 async function _sendProposalEmail(p,c,to,specDocs){
   toast("Generating the PDF…");
@@ -3672,13 +3737,15 @@ async function _sendProposalEmail(p,c,to,specDocs){
     }catch(e){toast("Could not load spec sheet \""+(d.name||"?")+"\" — try again, or untick it.","error");return;}
   }
   const totalKB=Math.round((blob.size+(specDocs||[]).reduce((s,d)=>s+(+d.size||0),0))/1024);
-  const bodyText=`Dear ${p.salutation||p.clientName},\n\nThank you for considering Gleenergy Renewables. Attached is your solar proposal ${p.propNo?("#"+p.propNo+" "):""}with the full system details, bill of materials and payment terms${p.pvKwp?` for the proposed ${p.pvKwp} kWp system`:""}.${specDocs&&specDocs.length?"\n\nWe have also attached the product specification sheets for the proposed equipment, for your reference.":""}\n\nWe're happy to walk you through it — just reply to this email or reach us anytime.\n\nBest regards,\n${p.repName||user.name}\n${p.company||"Gleenergy Renewables Company"}`;
-  toast("Sending to "+to+"… ("+totalKB+" KB, "+attachments.length+" file"+(attachments.length>1?"s":"")+")");
+  const hasSpecs=specDocs&&specDocs.length>0;
+  const bodyText=`Dear ${p.salutation||p.clientName},\n\nThank you for considering Gleenergy Renewables. Attached is your solar proposal ${p.propNo?("#"+p.propNo+" "):""}with the full system details, bill of materials and payment terms${p.pvKwp?` for the proposed ${p.pvKwp} kWp system`:""}.${hasSpecs?"\n\nThe attached document also includes the manufacturer specification sheets for the proposed equipment, for your reference.":""}\n\nWe're happy to walk you through it — just reply to this email or reach us anytime.\n\nBest regards,\n${p.repName||user.name}\n${p.company||"Gleenergy Renewables Company"}`;
+  toast("Sending to "+to+"… ("+totalKB+" KB"+(hasSpecs?", one consolidated PDF":"")+")");
   const base=(window.GLEENERGY_API||"/api/storage").replace(/\/storage\/?$/,"");
   let sent=false,errMsg="";
   try{
     const r=await fetch(base+"/send-email",{method:"POST",headers:window.gleenergyHeaders(),
-      body:JSON.stringify({to,subject:"Your solar proposal "+(p.propNo?("#"+p.propNo+" "):"")+"— Gleenergy Renewables",body:bodyText,attachments})});
+      body:JSON.stringify({to,subject:"Your solar proposal "+(p.propNo?("#"+p.propNo+" "):"")+"— Gleenergy Renewables",body:bodyText,attachments,
+        consolidate:true,merged_name:"Gleenergy Solar Proposal "+(p.propNo||"")+" - Complete.pdf"})});
     const d=await r.json().catch(()=>({}));
     if(r.ok&&d&&d.ok)sent=true;else errMsg=(d&&d.error)||("HTTP "+r.status);
   }catch(e){errMsg="No connection to the server.";}
@@ -3692,7 +3759,7 @@ async function _sendProposalEmail(p,c,to,specDocs){
     if(rec.status==="Draft")rec.status="Sent";
     await saveKey(K.prop,DB.proposals);
   }
-  await logAudit("send","proposal",p.clientName,`PDF emailed to ${to} (${totalKB} KB, ${attachments.length} file${attachments.length>1?"s":""})`);
+  await logAudit("send","proposal",p.clientName,`PDF emailed to ${to} (${totalKB} KB${attachments.length>1?`, consolidated from ${attachments.length} files`:""})`);
   /* Route the recipient into Follow-ups so the sales team monitors them:
      enroll in the Proposal Follow-Up sequence unless already actively in it. */
   let fuNote="";
@@ -4222,15 +4289,22 @@ function viewDocuments(){
 function docForm(){
   openModal("Upload document",`<div class="fg"><label>File * (max ~3 MB — product spec PDFs welcome)</label><input id="f_file" type="file"></div>
   <div class="grid2"><div class="fg"><label>Category</label><select id="f_cat"><option>General</option><option>Contract</option><option>Plan / Drawing</option><option>Permit</option><option>Proposal</option><option>Product Specs</option><option>ID / Document</option></select></div>
-  <div class="fg"><label>Link to client</label><select id="f_link"><option value="">— None —</option>${DB.clients.map(c=>`<option>${esc(c.name)}</option>`).join("")}</select></div></div>`,
+  <div class="fg"><label>Link to client</label><select id="f_link"><option value="">— None —</option>${DB.clients.map(c=>`<option>${esc(c.name)}</option>`).join("")}</select><div id="f_linkHint" style="font-size:11px;color:var(--muted);margin-top:4px"></div></div></div>`,
   [["Cancel","btn-out",closeModal],["Upload","btn-primary",async()=>{
     const fi=document.getElementById("f_file");if(!fi.files.length){alert("Choose a file.");return;}
     const file=fi.files[0];if(file.size>3*1024*1024){alert("File too large (max ~3 MB). Compress large PDFs first — smaller files also email faster to clients.");return;}
     const rd=new FileReader();rd.onload=async ev=>{const id=uid();
       const ok=await rawSet("p2:docfile:"+id,ev.target.result);if(!ok){alert("Could not store the file right now — please try again in a moment.");return;}
-      DB.documents.unshift({id,name:file.name,size:file.size,category:gv("f_cat"),linked:gv("f_link"),by:user.name,ts:new Date().toISOString()});
+      const isSpec=gv("f_cat")===SPEC_CAT;
+      DB.documents=await loadKey(K.doc,DB.documents)||DB.documents;
+      DB.documents.unshift({id,name:file.name,size:file.size,category:gv("f_cat"),linked:isSpec?"":gv("f_link"),by:user.name,ts:new Date().toISOString()});
       await saveKey(K.doc,DB.documents);await logAudit("create","document",file.name,"Uploaded");closeModal();viewDocuments();};
     rd.readAsDataURL(file);}]]);
+  /* Spec sheets are a shared library for proposal emails — a per-client link
+     would only confuse; the picker greys out when that category is chosen. */
+  const _cat=document.getElementById("f_cat"),_lnk=document.getElementById("f_link"),_lh=document.getElementById("f_linkHint");
+  const _paintLink=()=>{const spec=_cat.value===SPEC_CAT;_lnk.disabled=spec;if(spec)_lnk.value="";_lh.textContent=spec?"Spec sheets are a shared library for proposal emails — not linked to one client. Manage them in Proposals → Design settings too.":"";};
+  if(_cat&&_lnk){_cat.onchange=_paintLink;_paintLink();}
 }
 async function downloadDoc(id){try{const r=await window.storage.get("p2:docfile:"+id,true);const d=DB.documents.find(x=>x.id===id);
   if(!r||!r.value){alert("File data not found.");return;}const a=document.createElement("a");a.href=r.value;a.download=d?d.name:"document";a.click();

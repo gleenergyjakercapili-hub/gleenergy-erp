@@ -2,3 +2,4 @@ fastapi>=0.110
 uvicorn[standard]>=0.29
 openpyxl>=3.1          # reads attached payroll .xlsx/.xlsm workbooks (HR → Payroll workbooks)
 psycopg[binary,pool]>=3.1   # PostgreSQL driver + connection pool — required for cloud hosting (app_postgres.py); harmless locally
+pypdf>=4.0             # merges the proposal PDF + product spec sheets into ONE consolidated email attachment (/api/send-email)

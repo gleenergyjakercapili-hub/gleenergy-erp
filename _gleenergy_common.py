@@ -323,7 +323,9 @@ class EmailBody(BaseModel):
     to: str = ""
     subject: str = ""
     body: str = ""
-    attachments: List[EmailAttachment] = []   # e.g. the proposal PDF
+    attachments: List[EmailAttachment] = []   # e.g. the proposal PDF + spec sheets
+    consolidate: bool = False                 # merge all PDF attachments into ONE file
+    merged_name: str = ""                     # filename for the consolidated PDF
 
 
 class XlsxBody(BaseModel):
@@ -385,6 +387,7 @@ def _send_email(body: EmailBody):
 
     # Attachments (e.g. the proposal PDF + product spec sheets). Capped at
     # 10 files / 15 MB total — most mail providers reject anything larger.
+    decoded = []
     total = 0
     for att in (body.attachments or [])[:10]:
         raw = (att.b64 or "").strip()
@@ -397,10 +400,43 @@ def _send_email(body: EmailBody):
         total += len(data)
         if total > 15 * 1024 * 1024:
             return JSONResponse({"ok": False, "error": "Attachments are over 15 MB in total — too large to email."}, status_code=400)
-        mime = att.mime or "application/octet-stream"
+        decoded.append((att.filename or "attachment.bin", att.mime or "application/octet-stream", data))
+
+    # Consolidation: merge every PDF attachment (in order — the proposal
+    # first, then the spec sheets) into ONE file, so the client receives a
+    # single polished document instead of a pile of attachments. A PDF that
+    # pypdf cannot read fails the send with its name — better than quietly
+    # emailing an incomplete or broken package. If pypdf is not installed
+    # (e.g. the office PC before `pip install -r requirements.txt`), the
+    # files are sent separately so the email still goes out.
+    pdfs = [(n, d) for (n, m, d) in decoded if (m or "").lower() == "application/pdf"]
+    if body.consolidate and len(pdfs) >= 2:
+        try:
+            import io
+            from pypdf import PdfReader, PdfWriter
+            writer = PdfWriter()
+            for n, d in pdfs:
+                try:
+                    reader = PdfReader(io.BytesIO(d))
+                    for pg in reader.pages:
+                        writer.add_page(pg)
+                except Exception:
+                    return JSONResponse(
+                        {"ok": False, "error": f'Could not merge "{n}" into the consolidated PDF — re-export that file, or untick it.'},
+                        status_code=400,
+                    )
+            buf = io.BytesIO()
+            writer.write(buf)
+            merged_name = (body.merged_name or "").strip() or (pdfs[0][0].rsplit(".", 1)[0] + " - Complete.pdf")
+            decoded = ([(merged_name, "application/pdf", buf.getvalue())]
+                       + [(n, m, d) for (n, m, d) in decoded if (m or "").lower() != "application/pdf"])
+        except ImportError:
+            print("[send-email] pypdf not installed - sending attachments separately")
+
+    for name, mime, data in decoded:
         maintype, _, subtype = mime.partition("/")
         msg.add_attachment(data, maintype=maintype or "application", subtype=subtype or "octet-stream",
-                           filename=att.filename or "attachment.bin")
+                           filename=name)
 
     host = cfg.get("smtp_host", "smtp.gmail.com")
     port = int(cfg.get("smtp_port", 587))
