@@ -455,6 +455,27 @@ def _send_email(body: EmailBody):
                 s.login(user, password)
                 s.send_message(msg)
         return {"ok": True, "to": to}
+    except smtplib.SMTPAuthenticationError as e:
+        # The one people actually hit: wrong / stale App Password, or the
+        # password belongs to a different Gmail than smtp_user. Naming the
+        # stage leaks no secrets and saves a trip to the server log.
+        print(f"[send-email] auth failed: {e!r}")
+        return JSONResponse(
+            {"ok": False, "error": f"Gmail rejected the sign-in for {user or 'the configured account'} — the App Password doesn't match that account. Regenerate the App Password for EXACTLY that Gmail (2-Step Verification on, 16 characters, no spaces) and update email_config.json."},
+            status_code=500,
+        )
+    except smtplib.SMTPRecipientsRefused as e:
+        print(f"[send-email] recipient refused: {e!r}")
+        return JSONResponse(
+            {"ok": False, "error": f"The mail server refused the recipient address ({to}) — check the client's email for typos."},
+            status_code=500,
+        )
+    except (OSError, smtplib.SMTPConnectError) as e:
+        print(f"[send-email] connection failed: {e!r}")
+        return JSONResponse(
+            {"ok": False, "error": f"Could not reach the mail server ({host}:{port}) — check smtp_host and smtp_port in email_config.json (Gmail: smtp.gmail.com, port 587)."},
+            status_code=500,
+        )
     except Exception as e:
         # Don't leak internal SMTP detail to the caller; log it server-side.
         print(f"[send-email] failed: {e!r}")
