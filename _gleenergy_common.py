@@ -470,10 +470,31 @@ def _send_email(body: EmailBody):
             {"ok": False, "error": f"The mail server refused the recipient address ({to}) — check the client's email for typos."},
             status_code=500,
         )
-    except (OSError, smtplib.SMTPConnectError) as e:
-        print(f"[send-email] connection failed: {e!r}")
+    # ORDER MATTERS: smtplib's exceptions inherit from OSError, so the SMTP
+    # protocol branches must come BEFORE the network branch or Gmail's real
+    # refusals get mislabeled as "could not reach the server" (which is
+    # exactly the bug that hid a failing send behind a bogus network error).
+    except smtplib.SMTPResponseException as e:
+        detail = ""
+        try:
+            detail = (e.smtp_error or b"").decode("utf-8", "ignore")[:220]
+        except Exception:
+            detail = str(e)[:220]
+        print(f"[send-email] smtp {e.smtp_code}: {detail}")
         return JSONResponse(
-            {"ok": False, "error": f"Could not reach the mail server ({host}:{port}) — check smtp_host and smtp_port in email_config.json (Gmail: smtp.gmail.com, port 587)."},
+            {"ok": False, "error": f"The mail server answered with an error ({e.smtp_code}): {detail}"},
+            status_code=500,
+        )
+    except smtplib.SMTPException as e:
+        print(f"[send-email] session error: {e!r}")
+        return JSONResponse(
+            {"ok": False, "error": f"The mail session failed mid-way ({type(e).__name__}) — often a temporary block on the sender; wait a few minutes and try again."},
+            status_code=500,
+        )
+    except OSError as e:
+        print(f"[send-email] network error: {e!r}")
+        return JSONResponse(
+            {"ok": False, "error": f"Network problem talking to {host}:{port} ({type(e).__name__}) — usually temporary; try again in a moment."},
             status_code=500,
         )
     except Exception as e:
