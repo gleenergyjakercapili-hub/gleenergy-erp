@@ -798,6 +798,25 @@ def install_shared(app, auth_db=None):
             out["smtp_587"] = _probe("smtp.gmail.com", 587)
             out["smtp_465"] = _probe("smtp.gmail.com", 465)
             out["https_443_control"] = _probe("www.google.com", 443)
+
+            # Full handshake (EHLO + STARTTLS, NO credentials): if Gmail resets
+            # cloud-IP sessions, this shows the exact stage and exception type.
+            def _handshake(h, p):
+                t0 = _t.time()
+                stage = "connect"
+                try:
+                    with smtplib.SMTP(h, p, timeout=12) as s:
+                        stage = "ehlo"
+                        s.ehlo()
+                        stage = "starttls"
+                        s.starttls(context=ssl.create_default_context())
+                        stage = "ehlo-tls"
+                        s.ehlo()
+                    return {"ok": True, "ms": int((_t.time() - t0) * 1000)}
+                except Exception as e:
+                    return {"ok": False, "failed_at": stage, "error": f"{type(e).__name__}: {e}"[:160]}
+
+            out["smtp_handshake_587"] = _handshake("smtp.gmail.com", 587)
         return out
 
     @app.get("/")
