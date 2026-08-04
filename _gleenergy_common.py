@@ -442,19 +442,48 @@ def _send_email(body: EmailBody):
     port = int(cfg.get("smtp_port", 587))
     user = cfg.get("smtp_user", "")
     password = cfg.get("smtp_password", "")
-    try:
+    # Which step the session died at ("connect"/"ehlo"/"starttls"/"login"/
+    # "send") and on which port — named in every error message, because a
+    # credential-free handshake was proven to pass while real sends dropped
+    # mid-way, and the step is what tells the failure modes apart.
+    _stage = {"v": "connect", "port": port}
+
+    def _deliver(p):
+        _stage["port"] = p
+        _stage["v"] = "connect"
         context = ssl.create_default_context()
-        if port == 465:
-            with smtplib.SMTP_SSL(host, port, context=context, timeout=25) as s:
+        if p == 465:
+            with smtplib.SMTP_SSL(host, p, context=context, timeout=25) as s:
+                _stage["v"] = "login"
                 s.login(user, password)
+                _stage["v"] = "send"
                 s.send_message(msg)
         else:
-            with smtplib.SMTP(host, port, timeout=25) as s:
+            with smtplib.SMTP(host, p, timeout=25) as s:
+                _stage["v"] = "ehlo"
                 s.ehlo()
+                _stage["v"] = "starttls"
                 s.starttls(context=context)
+                s.ehlo()
+                _stage["v"] = "login"
                 s.login(user, password)
+                _stage["v"] = "send"
                 s.send_message(msg)
-        return {"ok": True, "to": to}
+
+    try:
+        try:
+            _deliver(port)
+        except OSError as e1:
+            # Hard drops and network errors get ONE retry over the alternate
+            # SSL route (465) — Gmail sometimes kills the STARTTLS route from
+            # cloud addresses while the direct-SSL route works. Protocol
+            # answers (auth failures, refusals) are NOT retried: same
+            # credentials would only fail the same way again.
+            if isinstance(e1, smtplib.SMTPResponseException) or port == 465:
+                raise
+            print(f"[send-email] port {port} failed at {_stage['v']} ({e1!r}) - retrying via SSL 465")
+            _deliver(465)
+        return {"ok": True, "to": to, "via": f"port {_stage['port']}"}
     except smtplib.SMTPAuthenticationError as e:
         # The one people actually hit: wrong / stale App Password, or the
         # password belongs to a different Gmail than smtp_user. Naming the
@@ -486,15 +515,15 @@ def _send_email(body: EmailBody):
             status_code=500,
         )
     except smtplib.SMTPException as e:
-        print(f"[send-email] session error: {e!r}")
+        print(f"[send-email] session error at {_stage['v']} on port {_stage['port']}: {e!r}")
         return JSONResponse(
-            {"ok": False, "error": f"The mail session failed mid-way ({type(e).__name__}) — often a temporary block on the sender; wait a few minutes and try again."},
+            {"ok": False, "error": f"The mail session was cut off at the {_stage['v']} step on port {_stage['port']} ({type(e).__name__}) — Gmail sometimes blocks sends from shared cloud servers; wait a few minutes and try again, and if it keeps happening the fix is switching to an HTTPS mail service."},
             status_code=500,
         )
     except OSError as e:
-        print(f"[send-email] network error: {e!r}")
+        print(f"[send-email] network error at {_stage['v']} on port {_stage['port']}: {e!r}")
         return JSONResponse(
-            {"ok": False, "error": f"Network problem talking to {host}:{port} ({type(e).__name__}) — usually temporary; try again in a moment."},
+            {"ok": False, "error": f"Network problem at the {_stage['v']} step on {host}:{_stage['port']} ({type(e).__name__}) — usually temporary; try again in a moment."},
             status_code=500,
         )
     except Exception as e:
