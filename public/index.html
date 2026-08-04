@@ -3650,8 +3650,18 @@ async function proposalPdfBlob(p){
      image on the proposal is an inline data URI — nothing to wait for. */
   const host=document.createElement("div");
   host.style.cssText="position:absolute;left:-12000px;top:0;background:#fff;width:210mm";
-  host.innerHTML='<div class="pages" style="display:block">'+proposalPages(p)+'</div>';
+  host.innerHTML='<div class="pages" style="display:block;padding:0;margin:0">'+proposalPages(p)+'</div>';
   document.body.appendChild(host);
+  /* Pin every page to EXACTLY one A4 sheet: the on-screen styles (the .pages
+     container's 24px padding, page margins/shadow, min-height that can round
+     past 297mm) shifted every slice boundary and made a 3-page proposal come
+     out as 5-7 PDF pages. Zero container padding + fixed border-box height +
+     hidden overflow guarantee page N of the document is page N of the PDF.
+     296mm (not 297) absorbs raster rounding at scale 2. */
+  host.querySelectorAll(".page").forEach(el=>{
+    el.style.margin="0";el.style.boxShadow="none";el.style.borderRadius="0";el.style.boxSizing="border-box";
+    el.style.width="210mm";el.style.height="296mm";el.style.minHeight="0";el.style.overflow="hidden";
+  });
   try{
     await new Promise(r=>setTimeout(r,150));   // one layout pass for the injected pages
     return await html2pdf().set({
@@ -3659,7 +3669,7 @@ async function proposalPdfBlob(p){
       image:{type:"jpeg",quality:0.92},
       html2canvas:{scale:2,useCORS:true,logging:false,backgroundColor:"#ffffff"},
       jsPDF:{unit:"mm",format:"a4",orientation:"portrait"},
-      pagebreak:{mode:["css"],after:".page"}
+      pagebreak:{mode:["css"],after:".page:not(:last-child)"}
     }).from(host.firstChild).outputPdf("blob");
   }finally{host.remove();}
 }
