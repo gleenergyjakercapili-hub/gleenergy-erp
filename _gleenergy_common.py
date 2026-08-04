@@ -323,6 +323,7 @@ class EmailBody(BaseModel):
     to: str = ""
     subject: str = ""
     body: str = ""
+    html: str = ""                            # optional styled body (plain text stays the fallback)
     attachments: List[EmailAttachment] = []   # e.g. the proposal PDF + spec sheets
     consolidate: bool = False                 # merge all PDF attachments into ONE file
     merged_name: str = ""                     # filename for the consolidated PDF
@@ -354,7 +355,7 @@ def _load_json(path):
 # in the hosting layer can throttle it — the durable choice for automated
 # outreach from cloud servers).
 # ----------------------------------------------------------------------
-def _send_via_brevo(cfg, to, subject, text, decoded):
+def _send_via_brevo(cfg, to, subject, text, decoded, html=""):
     import urllib.request
     import urllib.error
 
@@ -373,6 +374,8 @@ def _send_via_brevo(cfg, to, subject, text, decoded):
         "subject": subject,
         "textContent": text,
     }
+    if (html or "").strip():
+        payload["htmlContent"] = html      # textContent above stays the fallback
     rt = str(cfg.get("reply_to") or "").strip()
     if rt:
         payload["replyTo"] = {"email": rt}
@@ -441,6 +444,11 @@ def _send_email(body: EmailBody):
     if bcc:
         msg["Bcc"] = bcc               # private copy (stripped before sending, but still delivered)
     msg.set_content(text)
+    # Styled body: added as the HTML alternative BEFORE attachments so the
+    # message stays multipart/alternative-inside-mixed — clients that block
+    # HTML still fall back to the plain text above.
+    if (body.html or "").strip():
+        msg.add_alternative(body.html, subtype="html")
 
     # Attachments (e.g. the proposal PDF + product spec sheets). Capped at
     # 10 files / 15 MB total — most mail providers reject anything larger.
@@ -496,7 +504,7 @@ def _send_email(body: EmailBody):
     # servers). Anything else (or nothing) uses the classic Gmail SMTP path.
     provider = str(cfg.get("provider") or "").strip().lower()
     if provider == "brevo":
-        return _send_via_brevo(cfg, to, subject, text, decoded)
+        return _send_via_brevo(cfg, to, subject, text, decoded, html=body.html)
 
     for name, mime, data in decoded:
         maintype, _, subtype = mime.partition("/")

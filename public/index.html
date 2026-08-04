@@ -3718,6 +3718,30 @@ function emailProposalPdf(id){
   document.querySelectorAll(".pm-spec").forEach(cb=>cb.onchange=_upd);
   _upd();
 }
+/* Branded HTML body for the proposal email — email-safe (inline styles,
+   tables, no external images/fonts: mail clients block those), matching the
+   company violet + gold. Plain text remains the fallback for strict clients. */
+function proposalEmailHTML(p,t,hasSpecs){
+  return `<!doctype html><html><body style="margin:0;padding:0;background:#f4f2f9">
+  <div style="max-width:600px;margin:0 auto;font-family:Arial,Helvetica,sans-serif;color:#2a2540">
+    <div style="background:#4b2a85;padding:26px 30px">
+      <div style="color:#ffffff;font-size:21px;font-weight:bold;letter-spacing:1px">GLEENERGY</div>
+      <div style="color:#d8bd77;font-size:11px;letter-spacing:2px;text-transform:uppercase">Renewables Company</div>
+    </div>
+    <div style="background:#ffffff;padding:28px 30px">
+      <p style="margin:0 0 14px;font-size:15px">Dear <b>${esc(p.salutation||p.clientName)}</b>,</p>
+      <p style="margin:0 0 18px;font-size:14px;line-height:1.6">Thank you for considering solar with us. Your personalised proposal is ready — the complete document${hasSpecs?" together with the manufacturer specification sheets":""} is attached to this email as a single PDF.</p>
+      <table style="width:100%;border-collapse:collapse;background:#f7f4fc;border-radius:8px" cellpadding="0" cellspacing="0">
+        <tr><td style="padding:16px 18px 6px;font-size:11px;color:#7a7390;text-transform:uppercase;letter-spacing:1px">Proposal ${esc(p.propNo?("#"+p.propNo):"")}</td></tr>
+        ${p.pvKwp?`<tr><td style="padding:2px 18px;font-size:14px">Solar system: <b>${esc(p.pvKwp)} kWp${(p.batteryKwh&&+p.batteryKwh)?` · ${esc(p.batteryKwh)} kWh battery`:""}</b></td></tr>`:""}
+        <tr><td style="padding:2px 18px 16px;font-size:14px">Investment: <b style="color:#4b2a85;font-size:16px">${esc(peso(t.final))}</b></td></tr>
+      </table>
+      <p style="margin:18px 0;font-size:14px;line-height:1.6">We're happy to walk you through every page — simply reply to this email, or let us know a good time for a quick call or a site visit.</p>
+      <p style="margin:24px 0 0;font-size:14px;line-height:1.5">Best regards,<br><b>${esc(p.repName||user.name)}</b><br><span style="color:#7a7390">${esc(p.company||"Gleenergy Renewables Company")}</span>${p.footAddr?`<br><span style="color:#7a7390;font-size:12px">${esc(p.footAddr)}</span>`:""}</p>
+    </div>
+    <div style="padding:14px 30px;font-size:11px;color:#9a93ad;text-align:center">Prepared for ${esc(p.clientName)}${p.date?` · ${esc(p.date)}`:""} · figures remain subject to final site validation.</div>
+  </div></body></html>`;
+}
 async function _sendProposalEmail(p,c,to,specDocs){
   toast("Generating the PDF…");
   let blob;
@@ -3744,7 +3768,8 @@ async function _sendProposalEmail(p,c,to,specDocs){
   let sent=false,errMsg="";
   try{
     const r=await fetch(base+"/send-email",{method:"POST",headers:window.gleenergyHeaders(),
-      body:JSON.stringify({to,subject:"Your solar proposal "+(p.propNo?("#"+p.propNo+" "):"")+"— Gleenergy Renewables",body:bodyText,attachments,
+      body:JSON.stringify({to,subject:"Your solar proposal "+(p.propNo?("#"+p.propNo+" "):"")+"— Gleenergy Renewables",body:bodyText,
+        html:proposalEmailHTML(p,propTotals(p),hasSpecs),attachments,
         consolidate:true,merged_name:"Gleenergy Solar Proposal "+(p.propNo||"")+" - Complete.pdf"})});
     const d=await r.json().catch(()=>({}));
     if(r.ok&&d&&d.ok)sent=true;else errMsg=(d&&d.error)||("HTTP "+r.status);
