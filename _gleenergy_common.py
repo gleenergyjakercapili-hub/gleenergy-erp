@@ -548,14 +548,16 @@ def _send_email(body: EmailBody):
             _deliver(port)
         except OSError as e1:
             # Hard drops and network errors get ONE retry over the alternate
-            # SSL route (465) — Gmail sometimes kills the STARTTLS route from
-            # cloud addresses while the direct-SSL route works. Protocol
-            # answers (auth failures, refusals) are NOT retried: same
-            # credentials would only fail the same way again.
-            if isinstance(e1, smtplib.SMTPResponseException) or port == 465:
+            # route — Gmail sometimes kills one route from cloud addresses
+            # while the other still works (observed in both directions: 587
+            # dying at login, and 465 dying at send). Protocol answers (auth
+            # failures, refusals) are NOT retried: same credentials would
+            # only fail the same way again.
+            if isinstance(e1, smtplib.SMTPResponseException):
                 raise
-            print(f"[send-email] port {port} failed at {_stage['v']} ({e1!r}) - retrying via SSL 465")
-            _deliver(465)
+            alt = 465 if port != 465 else 587
+            print(f"[send-email] port {port} failed at {_stage['v']} ({e1!r}) - retrying via port {alt}")
+            _deliver(alt)
         return {"ok": True, "to": to, "via": f"port {_stage['port']}"}
     except smtplib.SMTPAuthenticationError as e:
         # The one people actually hit: wrong / stale App Password, or the
