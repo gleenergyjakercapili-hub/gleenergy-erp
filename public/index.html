@@ -146,7 +146,8 @@
   }
   .dx-tm [data-emp]{cursor:pointer}
   /* Boot splash — sits above everything until boot() decides login vs dashboard */
-  #bootSplash{position:fixed;inset:0;z-index:10000;background:linear-gradient(160deg,var(--brand-dark),var(--brand-2));display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;transition:opacity .28s ease}
+  /* Loading screen matches the sidebar's solid dark purple (user, 2026-08-06). */
+  #bootSplash{position:fixed;inset:0;z-index:10000;background:#2a0d3c;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;transition:opacity .28s ease}
   #bootSplash.bs-off{opacity:0;pointer-events:none}
   .boot-dots{display:flex;gap:8px}
   .boot-dots span{width:9px;height:9px;border-radius:50%;background:#fff;opacity:.5;animation:bootDot 1s infinite ease-in-out}
@@ -197,9 +198,9 @@
 
   #app{display:grid;grid-template-columns:235px 1fr;min-height:100vh}
   #app>div{min-width:0}
-  /* Solid brand-violet sidebar (#502e8a per user, 2026-08-06): one calm
+  /* Solid dark-purple sidebar (#2a0d3c per user, 2026-08-06): one calm deep
      surface so the colorful icon chips and gold active pill carry the eye. */
-  .side{background:#502e8a;color:#fff;padding:18px 14px;position:sticky;top:0;height:100vh;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.28) transparent}
+  .side{background:#2a0d3c;color:#fff;padding:18px 14px;position:sticky;top:0;height:100vh;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.28) transparent}
   .side::-webkit-scrollbar{width:8px}.side::-webkit-scrollbar-thumb{background:rgba(255,255,255,.28);border-radius:8px}.side::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.42)}.side::-webkit-scrollbar-track{background:transparent}
   .side .mark .brand-logo-dark{max-width:100%}
   .side .mark b{color:#fff}.side .mark span{color:rgba(255,255,255,.6)}
