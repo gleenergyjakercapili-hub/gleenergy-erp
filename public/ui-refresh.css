@@ -1,0 +1,239 @@
+/*
+  Gleenergy interface refinement
+  ------------------------------
+  A presentation-only layer that sits after the original app styles. It keeps
+  the existing markup and behaviour intact while giving every operational
+  screen the same visual rhythm.
+*/
+
+:root {
+  --brand: #173f66;
+  --brand-2: #2d679b;
+  --brand-dark: #102f4d;
+  --accent: #f2b441;
+  --ink: #182c3d;
+  --muted: #657586;
+  --line: #dce5ed;
+  --bg: #f4f7fa;
+  --card: #ffffff;
+  --red: #c8444c;
+  --ok: #21805a;
+  --warn: #a76a10;
+  --info: #2c6eaa;
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 16px;
+  --shadow-sm: 0 1px 2px rgba(16, 47, 77, .05);
+  --shadow-md: 0 8px 24px rgba(16, 47, 77, .08);
+  --shadow-lg: 0 20px 50px rgba(16, 47, 77, .16);
+}
+
+body {
+  background:
+    radial-gradient(900px 360px at 92% -140px, rgba(45, 103, 155, .10), transparent 68%),
+    linear-gradient(180deg, #f8fafc 0, var(--bg) 420px);
+}
+
+/* App frame ----------------------------------------------------------- */
+#app { grid-template-columns: 248px minmax(0, 1fr); }
+
+.side {
+  padding: 20px 14px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, .045), transparent 180px),
+    linear-gradient(180deg, #102f4d 0%, #153d60 54%, #102f4d 100%);
+  border-right: 1px solid rgba(255, 255, 255, .08);
+  box-shadow: 12px 0 34px rgba(16, 47, 77, .08);
+}
+
+.side .mark { padding-bottom: 8px !important; }
+.nav { gap: 5px; margin-top: 20px; }
+.nav button {
+  min-height: 42px;
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 9px 10px;
+  transition: background .16s ease, border-color .16s ease, color .16s ease, transform .16s ease;
+}
+.nav button:hover {
+  background: rgba(255, 255, 255, .10);
+  border-color: rgba(255, 255, 255, .10);
+  transform: translateX(2px);
+}
+.nav button.active {
+  background: linear-gradient(135deg, #f6c766, var(--accent));
+  border-color: rgba(255, 255, 255, .3);
+  color: #203445;
+  box-shadow: 0 7px 16px rgba(3, 20, 35, .20);
+}
+.nav .ico { border-radius: 7px; }
+.nav button.active .ico { background: rgba(16, 47, 77, .12); color: #102f4d; }
+.nav .gh { color: rgba(255, 255, 255, .57); padding-top: 15px; }
+
+.topbar {
+  min-height: 68px;
+  padding: 14px 28px;
+  background: rgba(255, 255, 255, .88);
+  border-bottom-color: rgba(220, 229, 237, .92);
+  box-shadow: 0 2px 16px rgba(16, 47, 77, .045);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+.topbar h1 { color: var(--brand-dark); font-size: 19px; letter-spacing: -.02em; }
+.side-toggle, .notif-btn, .kbtn {
+  border-color: var(--line);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+}
+.side-toggle:hover, .notif-btn:hover, .kbtn:hover { background: #f2f7fb; border-color: #b9cbd9; }
+.who .av { background: linear-gradient(145deg, var(--brand), var(--brand-2)); box-shadow: 0 4px 10px rgba(23, 63, 102, .22); }
+
+.content { max-width: 1600px; padding: 28px 30px 64px; }
+
+/* Action and form language ------------------------------------------ */
+.btn, .icobtn, .rowact-more {
+  min-height: 38px;
+  border: 1px solid #cedae4;
+  border-radius: var(--r-sm);
+  background: #fff;
+  box-shadow: var(--shadow-sm);
+  color: var(--brand);
+}
+.btn { padding: 8px 15px; }
+.icobtn { min-height: 32px; padding: 6px 10px; }
+.btn:hover, .icobtn:hover, .rowact-more:hover {
+  transform: translateY(-1px);
+  border-color: #9eb8cc;
+  background: #f9fcfe;
+  box-shadow: 0 5px 12px rgba(16, 47, 77, .10);
+}
+.btn:active, .icobtn:active, .rowact-more:active { transform: translateY(0); box-shadow: var(--shadow-sm); }
+.btn-primary, .icobtn.go {
+  border-color: var(--brand);
+  background: linear-gradient(135deg, #214f7a, var(--brand));
+  box-shadow: 0 5px 13px rgba(23, 63, 102, .22);
+}
+.btn-primary:hover, .icobtn.go:hover { background: linear-gradient(135deg, #2d679b, #173f66); }
+.btn-light { background: #edf4f9; border-color: #d5e2ec; }
+.btn-out { background: #fff; color: #526879; }
+.btn-danger, .icobtn.del { background: #fff6f6; border-color: #f0d2d4; box-shadow: none; }
+.icobtn.ok { background: #f0faf5; border-color: #cae8d8; box-shadow: none; }
+.icobtn.warn { background: #fff8e9; border-color: #f0ddac; box-shadow: none; }
+
+.search, .selx, .fg input, .fg select, .fg textarea, .login-card input, .chat-input textarea {
+  min-height: 38px;
+  border-color: #cad8e3;
+  border-radius: var(--r-sm);
+  background: #fbfdff;
+  box-shadow: inset 0 1px 1px rgba(16, 47, 77, .025);
+}
+.search:hover, .selx:hover, .fg input:hover, .fg select:hover, .fg textarea:hover { border-color: #9fb8cc; }
+.search:focus, .selx:focus, .fg input:focus, .fg select:focus, .fg textarea:focus, .login-card input:focus, .chat-input textarea:focus {
+  border-color: var(--brand-2);
+  box-shadow: 0 0 0 3px rgba(45, 103, 155, .14);
+}
+button:focus-visible, a:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
+  outline: 3px solid rgba(242, 180, 65, .48);
+  outline-offset: 2px;
+}
+
+/* Shared cards -------------------------------------------------------- */
+.kpis { gap: 16px; }
+.kpi, .panel {
+  border-color: var(--line);
+  box-shadow: var(--shadow-md);
+}
+.kpi {
+  min-height: 96px;
+  border-radius: var(--r-md);
+  padding: 18px 20px;
+}
+.kpi::before { width: 4px; }
+.kpi .k-ic { width: 46px; height: 46px; border-radius: 10px; }
+.kpi .n { font-size: 23px; letter-spacing: -.025em; }
+.kpi:hover { transform: translateY(-2px); box-shadow: 0 12px 26px rgba(16, 47, 77, .11); }
+
+.panel {
+  border-radius: var(--r-md);
+  margin-top: 20px;
+  box-shadow: var(--shadow-md);
+}
+.panel:hover { box-shadow: 0 12px 28px rgba(16, 47, 77, .10); }
+.panel-head {
+  min-height: 62px;
+  padding: 15px 20px;
+  background: linear-gradient(180deg, #fff, #fbfdff);
+  border-bottom-color: var(--line);
+}
+.panel-head h3 { color: var(--brand-dark); font-size: 15px; }
+.panel-intro { background: #f3f8fc; border-color: #dbe7f0; color: #38546a; }
+.empty { padding: 40px 24px; color: var(--muted); }
+
+/* Tables: a single, balanced treatment across all operational views. */
+#view table { color: #263a4a; }
+#view th {
+  height: 44px;
+  padding: 11px 18px;
+  color: #5d7182;
+  background: #f4f7fa;
+  border-bottom: 1px solid #d9e4ec;
+  font-size: 10.5px;
+  font-weight: 800;
+  letter-spacing: .075em;
+  white-space: nowrap;
+}
+#view td {
+  min-height: 52px;
+  padding: 13px 18px;
+  border-bottom-color: #e3ebf1;
+  line-height: 1.42;
+}
+#view tbody tr { transition: background .14s ease; }
+#view .tbl-enh tbody tr:nth-child(even) td { background: #fafcfd; }
+#view tr:hover td, #view .tbl-enh tbody tr:hover td { background: #f0f6fa; }
+#view .tbl-scroll, #view .scrolly { scrollbar-color: rgba(23, 63, 102, .38) transparent; }
+#view .tbl-scroll::-webkit-scrollbar-thumb, #view .scrolly::-webkit-scrollbar-thumb { background-color: rgba(23, 63, 102, .35); }
+
+.tag {
+  padding: 4px 9px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  font-size: 10.5px;
+  letter-spacing: .01em;
+}
+.t-lead, .t-inactive, .t-draft { background: #f0f3f6; border-color: #e2e8ed; color: #596b7a; }
+.t-contacted, .t-sent { background: #eaf3fb; border-color: #d4e4f2; color: #286298; }
+.t-proposal, .t-viewed { background: #fff7e6; border-color: #f4e1ae; color: #936510; }
+.t-won, .t-active, .t-signed { background: #edf8f1; border-color: #d2eadb; color: #25774f; }
+.t-lost, .t-rejected { background: #fff0f0; border-color: #f0d5d6; color: #b8424a; }
+
+/* Overlays and small components ------------------------------------- */
+.modal-bg, .ui-dialog-overlay { background: rgba(10, 32, 53, .48); backdrop-filter: blur(4px); -webkit-backdrop-filter: blur(4px); }
+.modal, .ui-dialog, .cmdk { border: 1px solid rgba(220, 229, 237, .9); box-shadow: var(--shadow-lg); }
+.modal-head, .modal-foot { border-color: var(--line); }
+.segbar { background: #edf3f7; padding: 4px; }
+.segbar button { color: #607384; }
+.segbar button.on { background: var(--brand); box-shadow: 0 3px 9px rgba(23, 63, 102, .25); }
+.notif-panel, #chatPanel { border-color: var(--line); box-shadow: var(--shadow-lg); }
+
+/* Compact layouts retain the same spacing and avoid clipped controls. */
+@media (max-width: 900px) {
+  #app { grid-template-columns: 1fr; }
+  .content { padding: 20px 16px 86px; }
+  .topbar { padding: 11px 16px; }
+  .side { box-shadow: none; }
+  .nav button:hover { transform: none; }
+}
+
+@media (max-width: 560px) {
+  .content { padding: 16px 12px 82px; }
+  .panel-head { padding: 14px; }
+  #view th { padding: 10px 14px; }
+  #view td { padding: 12px 14px; }
+  .kpi { padding: 15px 16px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav button, .btn, .icobtn, .rowact-more, .kpi, .panel, #view tbody tr { transition: none; }
+  .nav button:hover, .btn:hover, .icobtn:hover, .rowact-more:hover, .kpi:hover { transform: none; }
+}
