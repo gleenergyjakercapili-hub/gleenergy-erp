@@ -197,21 +197,25 @@
 
   #app{display:grid;grid-template-columns:235px 1fr;min-height:100vh}
   #app>div{min-width:0}
-  .side{background:linear-gradient(180deg,var(--brand-dark),var(--brand));color:#fff;padding:18px 14px;position:sticky;top:0;height:100vh;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.28) transparent}
+  /* Solid violet sidebar (user direction 2026-08-06): one calm surface so the
+     colorful icon chips and the gold active pill carry the visual interest. */
+  .side{background:#46246e;color:#fff;padding:18px 14px;position:sticky;top:0;height:100vh;overflow-y:auto;overflow-x:hidden;scrollbar-width:thin;scrollbar-color:rgba(255,255,255,.28) transparent}
   .side::-webkit-scrollbar{width:8px}.side::-webkit-scrollbar-thumb{background:rgba(255,255,255,.28);border-radius:8px}.side::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.42)}.side::-webkit-scrollbar-track{background:transparent}
   .side .mark .brand-logo-dark{max-width:100%}
   .side .mark b{color:#fff}.side .mark span{color:rgba(255,255,255,.6)}
   .nav{margin-top:22px;display:flex;flex-direction:column;gap:3px}
-  .nav button{display:flex;align-items:center;gap:10px;background:transparent;border:0;color:rgba(255,255,255,.82);
-    text-align:left;padding:10px 12px;border-radius:9px;font-size:13.5px;font-weight:600;width:100%}
+  .nav button{display:flex;align-items:center;gap:11px;background:transparent;border:0;color:rgba(255,255,255,.92);
+    text-align:left;padding:9px 12px;border-radius:12px;font-size:13.5px;font-weight:600;width:100%;line-height:1.25}
   .nav button:hover{background:rgba(255,255,255,.1);color:#fff}
-  .nav button.active{background:var(--accent);color:#3a2a00}
-  /* one icon language everywhere: outline strokes that inherit currentColor,
-     so state (rest / hover / active) is pure CSS and always consistent */
-  .nav .ico{width:26px;height:26px;border-radius:5px;background:rgba(255,255,255,.12);color:rgba(255,255,255,.92);display:flex;align-items:center;justify-content:center;flex:none;transition:background .15s}
-  .nav .ico svg{width:16px;height:16px}
-  .nav button:hover .ico{background:rgba(255,255,255,.2)}
-  .nav button.active .ico{background:rgba(42,24,84,.16);color:#2a1854}
+  /* Active = the full-width gold pill from the reference design; dark label
+     for contrast (Readability), the icon chip keeps its module color. */
+  .nav button.active{background:var(--accent);color:#331f02;border-radius:14px}
+  /* Colorful icon chips: each module gets its own vivid rounded square (set
+     inline from NAV_COLORS) with the shared white outline glyph on top —
+     recognizable at a glance, consistent in shape and stroke. */
+  .nav .ico{width:30px;height:30px;border-radius:9px;background:rgba(255,255,255,.14);color:#fff;display:flex;align-items:center;justify-content:center;flex:none;box-shadow:inset 0 -2px 4px rgba(0,0,0,.14)}
+  .nav .ico svg{width:17px;height:17px}
+  .nav button.active .ico{color:#fff}
   .nav .badge{margin-left:auto;background:var(--red);color:#fff;font-size:10px;font-weight:800;border-radius:10px;padding:1px 7px}
   /* --- grouped navigation: labeled, collapsible sections --- */
   .nav .grp{display:flex;flex-direction:column;gap:3px}
@@ -2469,6 +2473,17 @@ const NAVS=[["dashboard",NAVI.dashboard,"Dashboard","dashboard.view"],["clients"
   ["attendance",NAVI.attendance,"Attendance","attendance.view"],["claims",NAVI.claims,"Petty Cash & Claims","claims.submit"],["finance",NAVI.finance,"Finance","finance.view"],["commissions",NAVI.commissions,"Sales Commissions","commissions.view"],["accounting",NAVI.accounting,"Accounting","accounting.view"],["payroll",NAVI.payroll,"Payroll","payroll.view"],
   ["sops",NAVI.sops,"Process Flows","sop.view"],["employees",NAVI.employees,"Employees","employees.view"],["roles",NAVI.roles,"Roles & Access","roles.manage"],
   ["documents",NAVI.documents,"Documents","documents.view"],["audit",NAVI.audit,"Audit Log","audit.view"]];
+/* Chip color per module (the colorful rounded squares behind the white
+   glyphs). Vivid but harmonious; neighbors within a group stay distinct so
+   the eye can land on a module without reading. Missing key = neutral chip. */
+const NAV_COLORS={
+ dashboard:"#6366f1",clients:"#3b82f6",proposals:"#8b5cf6",followups:"#06b6d4",
+ survey:"#0ea5e9",projects:"#f97316",inventory:"#d97706",purchasing:"#f43f5e",
+ permits:"#22c55e",aftersales:"#3b82f6",schedule:"#ef4444",tasks:"#10b981",
+ joborders:"#f59e0b",attendance:"#6366f1",claims:"#ec4899",finance:"#eab308",
+ commissions:"#f97316",accounting:"#8b5cf6",payroll:"#14b8a6",sops:"#22c55e",
+ employees:"#3b82f6",roles:"#7c3aed",documents:"#0891b2",audit:"#64748b"
+};
 function dueCount(){return computeDue().length;}
 function purchNavCount(){
   if(typeof user==="undefined"||!user)return 0;
@@ -2537,7 +2552,8 @@ const NAV_GROUPS=[
   ["Admin",["sops","roles","documents","audit"]]];
 let navClosed={};try{navClosed=JSON.parse(localStorage.getItem("gl_navClosed")||"{}")||{};}catch(e){}
 function navItemBtn(n){const b=document.createElement("button");const dc=navBadgeCount(n[0]);
-  b.innerHTML=`<span class="ico">${n[1]}</span> ${n[2]}${dc?`<span class="badge">${dc}</span>`:""}`;
+  const chip=NAV_COLORS[n[0]]?` style="background:${NAV_COLORS[n[0]]}"`:"";
+  b.innerHTML=`<span class="ico"${chip}>${n[1]}</span> ${n[2]}${dc?`<span class="badge">${dc}</span>`:""}`;
   b.dataset.id=n[0];b.onclick=()=>go(n[0]);return b;}
 function buildNav(){const nav=document.getElementById("nav");nav.innerHTML="";
   const byId={};NAVS.forEach(n=>{byId[n[0]]=n;});
