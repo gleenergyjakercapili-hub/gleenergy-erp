@@ -6,7 +6,7 @@
 <title>Gleenergy Renewables — Company System</title>
 <!-- PWA: lets crew add a proper app icon to their phone's home screen -->
 <link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#502e8a">
+<meta name="theme-color" content="#6f2c8f">
 <link rel="icon" type="image/png" sizes="192x192" href="glee-icon-192.png">
 <link rel="apple-touch-icon" href="glee-icon-192.png">
 <meta name="apple-mobile-web-app-capable" content="yes">
@@ -146,8 +146,10 @@
   }
   .dx-tm [data-emp]{cursor:pointer}
   /* Boot splash — sits above everything until boot() decides login vs dashboard */
-  /* Loading screen matches the sidebar's solid dark purple (user, 2026-08-06). */
-  #bootSplash{position:fixed;inset:0;z-index:10000;background:#2a0d3c;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;transition:opacity .28s ease}
+  /* Loading screen: solid purple #6f2c8f (user's final branding, 2026-08-06),
+     paired with the matching theme-color meta so the phone status bar and the
+     splash read as one seamless surface at launch. */
+  #bootSplash{position:fixed;inset:0;z-index:10000;background:#6f2c8f;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:22px;transition:opacity .28s ease}
   #bootSplash.bs-off{opacity:0;pointer-events:none}
   .boot-dots{display:flex;gap:8px}
   .boot-dots span{width:9px;height:9px;border-radius:50%;background:#fff;opacity:.5;animation:bootDot 1s infinite ease-in-out}
