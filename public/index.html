@@ -756,7 +756,9 @@
   .msheet .mgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
   .msheet .mit{display:flex;flex-direction:column;align-items:center;gap:5px;background:#f8f6fd;border:1px solid var(--line);
     border-radius:12px;padding:10px 4px;font-size:10px;font-weight:700;color:#4a4459;cursor:pointer;text-align:center;position:relative;min-width:0}
-  .msheet .mit .ico{width:30px;height:30px;border-radius:9px;background:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(40,20,80,.12);flex:none}
+  /* Same colorful module chips as the sidebar: white outline glyph on the
+     module's own color (inline from NAV_COLORS); neutral chip as fallback. */
+  .msheet .mit .ico{width:30px;height:30px;border-radius:9px;background:#a5a0b8;color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 4px rgba(40,20,80,.18),inset 0 -2px 4px rgba(0,0,0,.14);flex:none}
   .msheet .mit .ico svg{width:18px;height:18px}
   .mbadge{position:absolute;top:4px;right:6px;min-width:15px;height:15px;background:var(--red);color:#fff;border-radius:8px;
     font-size:9px;font-weight:800;display:flex;align-items:center;justify-content:center;padding:0 4px}
@@ -2226,7 +2228,8 @@ function openMenuSheet(){
     if(!items.length)return;
     if(g)html+='<div class="mgh">'+esc(g)+'</div>';
     html+='<div class="mgrid">'+items.map(n=>{const dc=navBadgeCount(n[0]);
-      return '<div class="mit" data-go="'+n[0]+'"><span class="ico">'+n[1]+'</span>'+esc(n[2])+(dc?'<span class="mbadge">'+dc+'</span>':'')+'</div>';}).join("")+'</div>';
+      const chip=NAV_COLORS[n[0]]?' style="background:'+NAV_COLORS[n[0]]+'"':'';
+      return '<div class="mit" data-go="'+n[0]+'"><span class="ico"'+chip+'>'+n[1]+'</span>'+esc(n[2])+(dc?'<span class="mbadge">'+dc+'</span>':'')+'</div>';}).join("")+'</div>';
   });
   s.innerHTML=html;
   document.getElementById("msheetBg").classList.add("open");
