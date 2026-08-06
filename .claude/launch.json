@@ -12,6 +12,12 @@
       "runtimeExecutable": "py",
       "runtimeArgs": ["-c", "import os,tempfile;os.environ['GLEENERGY_DB']=os.path.join(tempfile.gettempdir(),'glee_scratch.db');import uvicorn;uvicorn.run('app:app',host='127.0.0.1',port=8001)"],
       "port": 8001
+    },
+    {
+      "name": "gleenergy-ui-preview",
+      "runtimeExecutable": "py",
+      "runtimeArgs": ["-c", "import os,sys,tempfile;wt=os.path.join(tempfile.gettempdir(),'claude','C--Users-TEST-OneDrive-Documents-Gleenergy-Renewables-Python-SQL','681ef2ff-4957-4e4d-9070-7eb073046dda','scratchpad','ui-preview');os.chdir(wt);sys.path.insert(0,wt);os.environ['GLEENERGY_DB']=os.path.join(tempfile.gettempdir(),'glee_uipreview.db');import uvicorn;uvicorn.run('app:app',host='127.0.0.1',port=8002)"],
+      "port": 8002
     }
   ]
 }
