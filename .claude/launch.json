@@ -10,7 +10,7 @@
     {
       "name": "gleenergy-test",
       "runtimeExecutable": "py",
-      "runtimeArgs": ["-c", "import os,tempfile;os.environ['GLEENERGY_DB']=os.path.join(tempfile.gettempdir(),'glee_scratch.db');import uvicorn;uvicorn.run('app:app',host='127.0.0.1',port=8001)"],
+      "runtimeArgs": ["-c", "import os,tempfile;os.environ['GLEENERGY_DB']=os.path.join(tempfile.gettempdir(),'glee_scratch.db');os.environ['GLEENERGY_LEADS_KEY']='scratch-test-key';import uvicorn;uvicorn.run('app:app',host='127.0.0.1',port=8001)"],
       "port": 8001
     },
     {

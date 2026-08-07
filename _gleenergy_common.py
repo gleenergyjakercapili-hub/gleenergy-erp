@@ -82,7 +82,8 @@ API_KEY = os.environ.get("GLEENERGY_API_KEY", "").strip()
 
 # Paths reachable without a session (the auth endpoints must be, or nobody
 # could ever sign in).
-_OPEN_API_PATHS = {"/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/me"}
+_OPEN_API_PATHS = {"/api/health", "/api/auth/login", "/api/auth/logout", "/api/auth/me",
+                   "/api/leads/inbound"}   # keyed by GLEENERGY_LEADS_KEY, not by session
 
 # ----------------------------------------------------------------------
 # Sign-in sessions
@@ -345,6 +346,55 @@ def _load_json(path):
             return json.load(f)
     except Exception:
         return {}
+
+
+# ----------------------------------------------------------------------
+# Inbound leads (Meta Lead Ads → Make/Zapier → here). Small helpers the
+# webhook route in install_shared() uses to write records the same shape
+# the browser app writes, so captured leads are indistinguishable from
+# hand-entered clients and flow through live sync / follow-ups untouched.
+# ----------------------------------------------------------------------
+def _uid():
+    """Match the app's id format: base36 millis + 4 random base36 chars."""
+    import random
+    import string
+    digs = string.digits + string.ascii_lowercase
+    t = int(time.time() * 1000)
+    out = ""
+    while t:
+        out = digs[t % 36] + out
+        t //= 36
+    return out + "".join(random.choice(digs) for _ in range(4))
+
+
+def _manila_today():
+    """Business dates in this system are Philippine dates, never UTC."""
+    return (datetime.datetime.now(datetime.timezone.utc) + datetime.timedelta(hours=8)).strftime("%Y-%m-%d")
+
+
+def _read_list(kv_get, key):
+    raw = kv_get(key)
+    if not raw:
+        return []
+    try:
+        v = json.loads(raw)
+        return v if isinstance(v, list) else []
+    except Exception:
+        return []
+
+
+def _server_audit(kv_get, kv_set, action, entity, name, detail):
+    """Append to the app's audit trail as the webhook identity (best-effort —
+    a failed audit write must never lose the lead itself)."""
+    try:
+        arr = _read_list(kv_get, "p2:audit")
+        arr.insert(0, {"ts": datetime.datetime.now(datetime.timezone.utc).isoformat().replace("+00:00", "Z"),
+                       "by": "Meta Ads webhook", "role": "-", "action": action,
+                       "entity": entity, "name": name or "", "detail": detail or ""})
+        del arr[300:]
+        kv_set("p2:audit", json.dumps(arr))
+    except Exception as e:
+        print(f"[leads] audit write failed: {e!r}")
 
 
 # ----------------------------------------------------------------------
@@ -901,6 +951,107 @@ def install_shared(app, auth_db=None):
     @app.post("/api/xlsx/parse")
     def xlsx_parse(body: XlsxBody):
         return _parse_xlsx(body)
+
+    # --- Inbound leads: Meta Lead Ads → Make/Zapier → this endpoint --------
+    # Open path (no session — an ad platform can't sign in) but keyed: the
+    # bridge must send the GLEENERGY_LEADS_KEY value. Creates a normal client
+    # record (stage Lead), dedupes on phone/email, auto-enrolls the lead in
+    # the "New Lead Nurture" email sequence so Follow-ups flags it instantly,
+    # and audit-logs the capture. Live sync then puts the new prospect on
+    # every signed-in screen within ~10 seconds — no manual effort anywhere.
+    @app.post("/api/leads/inbound")
+    async def leads_inbound(request: Request):
+        secret = os.environ.get("GLEENERGY_LEADS_KEY", "").strip()
+        if not secret:
+            return JSONResponse(
+                {"ok": False, "error": "Lead capture is not enabled — set the GLEENERGY_LEADS_KEY environment variable on the server first."},
+                status_code=503,
+            )
+        given = (request.headers.get("x-leads-key") or request.query_params.get("key") or "").strip()
+        if not hmac.compare_digest(given, secret):
+            return JSONResponse({"ok": False, "error": "Invalid lead key."}, status_code=401)
+        try:
+            data = await request.json()
+        except Exception:
+            data = {}
+        if not isinstance(data, dict):
+            data = {}
+
+        def pick(*names):
+            for n in names:
+                v = data.get(n)
+                if v not in (None, ""):
+                    return str(v).strip()
+            return ""
+
+        name = pick("name", "full_name", "fullname", "full name", "lead_name")
+        phone = pick("phone", "phone_number", "phone number", "mobile", "mobile_number", "contact")
+        email = pick("email", "email_address", "e-mail")
+        address = pick("address", "street_address", "city", "location")
+        campaign = pick("campaign", "campaign_name", "adset_name", "ad_name", "form_name", "form", "source")
+        if not (name or phone or email):
+            return JSONResponse(
+                {"ok": False, "error": "Lead has no name, phone or email — check the field mapping in your Make/Zapier scenario."},
+                status_code=400,
+            )
+        if not name:
+            name = phone or email
+
+        # Any custom lead-form questions the bridge passes along land in notes.
+        known = {"name", "full_name", "fullname", "full name", "lead_name", "phone", "phone_number",
+                 "phone number", "mobile", "mobile_number", "contact", "email", "email_address", "e-mail",
+                 "address", "street_address", "city", "location", "campaign", "campaign_name",
+                 "adset_name", "ad_name", "form_name", "form", "source", "key"}
+        extras = [f"{k}: {str(v).strip()}" for k, v in data.items()
+                  if k not in known and isinstance(v, (str, int, float)) and str(v).strip()][:12]
+
+        kv_get, kv_set = auth_db["kv_get"], auth_db["kv_set"]
+        clients = _read_list(kv_get, "p2:clients")
+        norm = lambda s: "".join(ch for ch in str(s).lower() if ch.isalnum())
+        np, ne = norm(phone), norm(email)
+        today = _manila_today()
+        src = ("Meta Ads" + (" — " + campaign if campaign else ""))[:80]
+
+        dup = next((c for c in clients if (np and norm(c.get("phone", "")) == np)
+                    or (ne and norm(c.get("email", "")) == ne)), None)
+        if dup:
+            note = f"[{today}] Re-inquired via {src}."
+            dup["notes"] = (((dup.get("notes") or "") + "\n" + note).strip())[:4000]
+            kv_set("p2:clients", json.dumps(clients))
+            _server_audit(kv_get, kv_set, "update", "client", dup.get("name", ""), f"Repeat lead via {src}")
+            return {"ok": True, "deduped": True, "clientId": dup.get("id", "")}
+
+        cid = _uid()
+        notes = f"Captured automatically from {src} on {today}."
+        if extras:
+            notes += "\n" + "\n".join(extras)
+        clients.insert(0, {
+            "id": cid, "createdAt": today, "name": name[:120], "phone": phone[:40], "email": email[:120],
+            "contactPerson": "", "contactPhone": "", "address": address[:200], "pinUrl": "",
+            "source": src, "stage": "Lead", "clientType": "Standard", "assigned": "",
+            "notes": notes[:4000], "preferredSystem": "", "roofType": "", "siteVisit": "",
+            "monthlyBill": 0, "engStageAt": "",
+        })
+        kv_set("p2:clients", json.dumps(clients))
+
+        enrolled = False
+        seqs = _read_list(kv_get, "p2:sequences")
+        seq = next((s for s in seqs if str(s.get("name", "")).strip().lower() == "new lead nurture"),
+                   seqs[0] if seqs else None)
+        if seq:
+            enr = _read_list(kv_get, "p2:enrollments")
+            already = any(e.get("status") == "Active" and e.get("sequenceId") == seq.get("id")
+                          and (e.get("clientId") == cid or e.get("clientName") == name) for e in enr)
+            if not already:
+                enr.insert(0, {"id": _uid(), "clientId": cid, "clientName": name[:120],
+                               "sequenceId": seq.get("id", ""), "start": today, "step": 0,
+                               "status": "Active", "log": []})
+                kv_set("p2:enrollments", json.dumps(enr))
+                enrolled = True
+
+        _server_audit(kv_get, kv_set, "create", "client", name,
+                      f"New lead captured from {src}" + (" · enrolled in follow-ups" if enrolled else ""))
+        return {"ok": True, "clientId": cid, "enrolled": enrolled}
 
     @app.get("/api/health")
     def health(diag: str = ""):

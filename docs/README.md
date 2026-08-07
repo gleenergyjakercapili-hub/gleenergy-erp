@@ -202,6 +202,48 @@ automated outreach. To switch the system to Brevo:
     have one) removes that and improves deliverability.
 
 -----------------------------------------------------------------------
+META LEAD ADS → AUTOMATIC LEAD CAPTURE (no manual effort)
+-----------------------------------------------------------------------
+Leads from Facebook/Instagram Lead Ads flow straight into Clients / CRM:
+each submission creates a client (stage "Lead", source "Meta Ads — <ad>"),
+custom form answers land in the client's notes, repeat inquiries annotate
+the existing person instead of duplicating them, the lead is auto-enrolled
+in the "New Lead Nurture" email sequence (so Follow-ups flags it at once),
+and live sync shows the new prospect on every staff screen in ~10 seconds.
+
+ONE-TIME SETUP
+
+  A. Turn the endpoint on (Render dashboard, ~1 minute):
+     1. dashboard.render.com → gleenergy-erp (web service) → Environment.
+     2. Add environment variable:  GLEENERGY_LEADS_KEY
+        Click "Generate" for a strong value (or invent a long random one).
+        Save — the service redeploys. Keep this value private: anyone who
+        has it can create leads in your CRM (nothing more).
+
+  B. Bridge Meta to the system with Make.com (free tier covers ~1,000
+     leads/month; Zapier works the same way):
+     1. make.com → Create scenario.
+     2. First module: "Facebook Lead Ads → Watch Leads" — connect the
+        company Facebook account, pick the Page and the lead form.
+     3. Second module: "HTTP → Make a request":
+          URL:     https://gleenergy-erp.onrender.com/api/leads/inbound
+          Method:  POST
+          Headers: X-Leads-Key = the GLEENERGY_LEADS_KEY value
+          Body type: JSON, with fields mapped from module 1, e.g.:
+            { "name": {{full_name}}, "phone": {{phone_number}},
+              "email": {{email}}, "campaign": {{ad_name}} }
+          Any EXTRA fields you map (budget, roof type, questions) are
+          saved into the client's notes automatically.
+     4. Run once with Meta's "Send test lead" tool, then turn the
+        scenario ON.
+
+  The endpoint answers:
+    503 "not enabled"  → the env variable isn't set yet
+    401 "invalid key"  → the header value doesn't match
+    400                → the mapped lead had no name, phone or email
+    {"ok":true,...}    → captured (deduped:true = repeat inquiry noted)
+
+-----------------------------------------------------------------------
 SMS — REMOVED (2026-08)
 -----------------------------------------------------------------------
 Follow-up outreach is EMAIL-ONLY. SMS shifted into the Meta Ads /

@@ -102,6 +102,19 @@ def _kv_get_raw(key):
     return row[0] if row else None
 
 
+def _kv_set_raw(key, val):
+    """Server-side write (same upsert as /api/storage/set) — used by the
+    inbound-leads webhook to create client records without a browser."""
+    with contextlib.closing(_conn()) as conn:
+        conn.execute(
+            "INSERT INTO kv(key, value, updated_at) VALUES(?, ?, CURRENT_TIMESTAMP) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value, updated_at = CURRENT_TIMESTAMP "
+            "WHERE kv.value IS NOT excluded.value",
+            (key, val),
+        )
+        conn.commit()
+
+
 def _sess_get(token_hash):
     with contextlib.closing(_conn()) as conn:
         row = conn.execute(
@@ -143,6 +156,7 @@ def _sess_prune(now):
 
 AUTH_DB = {
     "kv_get": _kv_get_raw,
+    "kv_set": _kv_set_raw,
     "sess_get": _sess_get,
     "sess_put": _sess_put,
     "sess_touch": _sess_touch,
